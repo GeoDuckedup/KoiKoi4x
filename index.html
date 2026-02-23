@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Hanafuda Koi-Koi</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="score-panel">
+        <div class="score-box">
+          <span>CPU</span>
+          <strong id="cpu-score">0</strong>
+        </div>
+        <div class="meta-box">
+          <div id="game-counter">Game 1 / 12</div>
+          <div id="dealer-label">Dealer: You</div>
+          <div id="turn-label">Turn: You</div>
+        </div>
+        <div class="score-box">
+          <span>You</span>
+          <strong id="player-score">0</strong>
+        </div>
+      </section>
+
+      <section class="opponent-zone">
+        <div class="zone-header">
+          <span>CPU Hand</span>
+          <span id="cpu-hand-count">8 cards</span>
+        </div>
+        <div class="opponent-layout">
+          <div id="cpu-hand" class="cpu-hand-strip"></div>
+          <aside id="cpu-profile" class="cpu-profile">
+            <img id="cpu-avatar" alt="CPU profile avatar" />
+            <div id="cpu-profile-name" class="cpu-profile-name">The Monk</div>
+            <div id="cpu-profile-style" class="cpu-profile-style">Balanced</div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="field-zone" class="field-zone">
+        <div class="zone-header">
+          <span>Field</span>
+          <span class="field-meta">
+            <span id="field-helper" class="field-helper" hidden>Choose 1</span>
+            <span id="deck-count">Deck: 24</span>
+          </span>
+        </div>
+        <div class="field-layout">
+          <div id="field" class="field-grid"></div>
+          <aside id="draw-preview" class="draw-preview">
+            <div class="draw-preview-label">Recent Deck Pull</div>
+            <div class="draw-preview-card">
+              <canvas id="draw-preview-canvas" width="138" height="170"></canvas>
+            </div>
+            <div id="draw-preview-text" class="draw-preview-text">Waiting for draw.</div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="captured-zone">
+        <div class="captured-col">
+          <div class="zone-header compact">
+            <span>CPU Captures</span>
+            <span id="cpu-captured-count">0</span>
+          </div>
+          <div id="cpu-captured" class="captured-grid"></div>
+          <div id="cpu-yaku" class="yaku-line">No set</div>
+        </div>
+        <div class="captured-col">
+          <div class="zone-header compact">
+            <span>Your Captures</span>
+            <span id="player-captured-count">0</span>
+          </div>
+          <div id="player-captured" class="captured-grid"></div>
+          <div id="player-yaku" class="yaku-line">No set</div>
+        </div>
+      </section>
+
+      <section id="player-zone" class="player-zone">
+        <div class="zone-header">
+          <span>Your Hand</span>
+          <span id="koi-state">Koi-Koi: not called</span>
+        </div>
+        <div id="hand-lock-note" class="hand-lock-note" hidden>Finish field choice above.</div>
+        <div id="player-hand" class="hand player"></div>
+      </section>
+
+      <section id="context-zone" class="context-zone">
+        <button id="context-left-btn" type="button" class="context-btn" data-action="pass" disabled>
+          Pass
+        </button>
+        <button id="context-right-btn" type="button" class="context-btn" data-action="koi" disabled>
+          Koi-Koi
+        </button>
+      </section>
+
+      <section class="message-zone">
+        <div class="zone-header compact">
+          <span>Action Log</span>
+          <span id="log-count">0</span>
+        </div>
+        <ol id="action-log" class="action-log">
+          <li>SYS: Loading cards...</li>
+        </ol>
+      </section>
+
+      <section id="rules-panel" class="rules-panel" hidden>
+        <div class="rules-pages">
+          <article class="rules-copy">
+            <h2>House Rules</h2>
+            <p>These are the active rules used by this version.</p>
+
+            <h3>Round Flow</h3>
+            <ul>
+              <li>Match has 12 rounds (January through December).</li>
+              <li>Each round starts with table multiplier at <strong>1x</strong>.</li>
+              <li>On your turn: play a card, resolve month match on field, then flip one deck card and resolve its match.</li>
+            </ul>
+
+            <h3>Koi-Koi Decision</h3>
+            <ul>
+              <li>When a player forms a <strong>new yaku</strong>, they may pass or call Koi-Koi.</li>
+              <li><strong>Pass</strong>: round ends, scorer gets <code>yaku points x table multiplier</code>.</li>
+              <li><strong>Koi-Koi</strong>: round continues and multiplier increases by 1 (max 4x).</li>
+              <li>Koi-Koi can be called multiple times by either player in one round.</li>
+            </ul>
+
+            <h3>Add-On Rule</h3>
+            <ul>
+              <li>Point add-ons (example: extra seed/scroll/basic after base threshold) increase points only.</li>
+              <li>Add-ons are not a new yaku event and do <strong>not</strong> open pass/Koi-Koi choice.</li>
+            </ul>
+
+            <h3>Deck Exhaustion</h3>
+            <ul>
+              <li>If the deck and hands run out before a pass, only the <strong>last Koi-Koi caller</strong> scores.</li>
+              <li>They score at current table multiplier.</li>
+            </ul>
+
+            <h3>Next Round Starter</h3>
+            <ul>
+              <li>If winner scored at <strong>3x or 4x</strong>, winner starts next round.</li>
+              <li>If winner scored at <strong>1x or 2x</strong>, loser starts next round.</li>
+            </ul>
+
+            <h3>1x Carryover Bonus</h3>
+            <ul>
+              <li>If previous round was won at <strong>1x</strong>, the loser gets next round first-yaku privilege.</li>
+              <li>That player may pass their first new yaku at <strong>2x</strong>, or call Koi-Koi to jump table to <strong>3x</strong>.</li>
+              <li>If the previous 1x winner gets first yaku instead, normal options apply (pass at 1x or Koi-Koi to 2x).</li>
+            </ul>
+
+            <h3>Round 12 Leader Restriction</h3>
+            <ul>
+              <li>If a player is ahead at start of round 12 and forms the first yaku at pass value 1x, they are forced to Koi-Koi.</li>
+              <li>Exception: if that player has the special 2x first-yaku privilege, they may pass.</li>
+            </ul>
+
+            <h3>Yaku Points</h3>
+            <ul>
+              <li>Five Lights: 10</li>
+              <li>Four Lights: 8 (or 7 with rain light)</li>
+              <li>Three Lights (no rain): 5</li>
+              <li>Blossom Viewing (Cherry Curtain + Sake Cup): 5</li>
+              <li>Moon Viewing (Moon Light + Sake Cup): 5</li>
+              <li>Animal Trio set: 5</li>
+              <li>Red Scroll set: 5</li>
+              <li>Blue Scroll set: 5</li>
+              <li>Red and Blue Scroll sets together: 10</li>
+              <li>Seeds: 5 seeds = 3, then +1 per extra seed</li>
+              <li>Scrolls: 5 scrolls = 1, then +1 per extra scroll</li>
+              <li>Basics: 10 basics = 1, then +1 per extra basic (Sake Cup can count as basic)</li>
+              <li>Round Month Sweep (all 4 cards of current round month): 5</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <header class="top">
+        <div>
+          <h1>Hanafuda Koi-Koi</h1>
+        </div>
+        <button id="rules-toggle" class="ghost" type="button">Rules</button>
+      </header>
+    </main>
+
+    <script src="game.js"></script>
+  </body>
+</html>
