@@ -71,3 +71,10 @@ Original prompt: Get rid of need for manuals folder. Go through the code and mak
 - Replaced rules panel text with the new player-friendly instruction set from chat.
 - Kept accordion UI and section-by-section expand/collapse behavior.
 - New sections now include: Objective, Cards and Matching, Setup, Turn Structure, Capture Rules, Yaku/Pass/Koi-Koi, Round-to-Round Start Rules, Scoring, Quick Start.
+- Added CPU phase-1 selected-card preview in CPU profile panel (avatar area).
+- During CPU turn, selected hand card now shows briefly before the card is played to field.
+- Preview uses new `cpu-phase1-preview-canvas` and temporary state `cpuPhase1PreviewCardId`.
+- Avatar hides during preview and restores automatically when phase-1 resolve begins.
+- Added `cpu_phase1_preview` to `render_game_to_text` payload for test/debug visibility.
+- Validation: static server checks for index/js/css returned HTTP 200; Playwright smoke could not run here because `npx` is unavailable.
+- Fixed CPU profile default layout artifact by forcing hidden phase1 preview canvas to fully collapse (`display: none !important` when `[hidden]`).

@@ -346,6 +346,7 @@ const PLAYER_DRAW_REVEAL_LINGER_MS = 420;
 const CPU_DECK_FLIP_DELAY_MS = 320;
 const CPU_DRAW_REVEAL_LINGER_MS = 360;
 const AI_STEP_THINK_MS = 300;
+const AI_STEP_CPU_PHASE1_PREVIEW_MS = 520;
 const AI_STEP_TARGET_MS = 340;
 const AI_STEP_DRAW_RESOLVE_MS = 360;
 const AI_STEP_DECISION_MS = 420;
@@ -369,6 +370,7 @@ const state = {
   pendingSelection: null,
   awaitingDeckFlip: null,
   aiPreview: null,
+  cpuPhase1PreviewCardId: null,
   awaitingDecision: null,
   lastKoiCaller: null,
   firstYakuPlayer: null,
@@ -456,6 +458,7 @@ function cacheUI() {
   ui.playerHand = document.getElementById("player-hand");
   ui.field = document.getElementById("field");
   ui.cpuAvatar = document.getElementById("cpu-avatar");
+  ui.cpuPhase1PreviewCanvas = document.getElementById("cpu-phase1-preview-canvas");
   ui.cpuProfileName = document.getElementById("cpu-profile-name");
   ui.cpuProfileStyle = document.getElementById("cpu-profile-style");
   ui.drawPreviewCanvas = document.getElementById("draw-preview-canvas");
@@ -570,6 +573,7 @@ function startRound() {
   state.pendingSelection = null;
   state.awaitingDeckFlip = null;
   state.aiPreview = null;
+  state.cpuPhase1PreviewCardId = null;
   state.awaitingDecision = null;
   state.firstYakuPlayer = null;
   state.lastKoiCaller = null;
@@ -774,6 +778,9 @@ function focusPendingFieldChoice() {
 function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
   state.pendingSelection = null;
   state.aiPreview = null;
+  if (playerIndex === 1) {
+    state.cpuPhase1PreviewCardId = null;
+  }
   const moveNumber = nextMoveNumber(playerIndex);
 
   const player = state.players[playerIndex];
@@ -1569,35 +1576,43 @@ function performAITurn() {
   scheduleAIStep(AI_STEP_THINK_MS, () => {
     if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
 
-    const matches = getFieldMatches(choice.card.month);
-    if (matches.length > 0) {
-      const targetOptions =
-        matches.length === 3
-          ? matches.map((entry) => entry.id)
-          : matches.length === 2 && choice.targetFieldId
-            ? [choice.targetFieldId]
-            : [matches[0].id];
-      const aiPrompt =
-        matches.length === 3
-          ? `CPU lines up a ${describeMonth(choice.card.month)} sweep.`
-          : matches.length === 2 && choice.targetFieldId
-            ? `CPU targets ${CARD_BY_ID.get(choice.targetFieldId)?.name || "a field card"}.`
-            : `CPU targets ${matches[0].name}.`;
-      state.aiPreview = {
-        options: targetOptions,
-        prompt: aiPrompt,
-      };
-      addSystemLog(aiPrompt);
-      renderAll();
-      scheduleAIStep(AI_STEP_TARGET_MS, () => {
-        if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
-        state.aiPreview = null;
-        executePlayFromHand(1, choice.card.id, choice.targetFieldId || null);
-      });
-      return;
-    }
+    state.cpuPhase1PreviewCardId = choice.card.id;
+    addSystemLog(`CPU selected ${choice.card.name}.`);
+    renderAll();
 
-    executePlayFromHand(1, choice.card.id, null);
+    scheduleAIStep(AI_STEP_CPU_PHASE1_PREVIEW_MS, () => {
+      if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+
+      const matches = getFieldMatches(choice.card.month);
+      if (matches.length > 0) {
+        const targetOptions =
+          matches.length === 3
+            ? matches.map((entry) => entry.id)
+            : matches.length === 2 && choice.targetFieldId
+              ? [choice.targetFieldId]
+              : [matches[0].id];
+        const aiPrompt =
+          matches.length === 3
+            ? `CPU lines up a ${describeMonth(choice.card.month)} sweep.`
+            : matches.length === 2 && choice.targetFieldId
+              ? `CPU targets ${CARD_BY_ID.get(choice.targetFieldId)?.name || "a field card"}.`
+              : `CPU targets ${matches[0].name}.`;
+        state.aiPreview = {
+          options: targetOptions,
+          prompt: aiPrompt,
+        };
+        addSystemLog(aiPrompt);
+        renderAll();
+        scheduleAIStep(AI_STEP_TARGET_MS, () => {
+          if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+          state.aiPreview = null;
+          executePlayFromHand(1, choice.card.id, choice.targetFieldId || null);
+        });
+        return;
+      }
+
+      executePlayFromHand(1, choice.card.id, null);
+    });
   });
 }
 
@@ -1621,6 +1636,7 @@ function clearAITask() {
   state.aiTimer = null;
   state.aiTask = null;
   state.aiPreview = null;
+  state.cpuPhase1PreviewCardId = null;
 }
 
 function clearDrawRevealTask() {
@@ -2001,11 +2017,34 @@ function renderField() {
 
 function renderCpuProfile() {
   const profile = CPU_PROFILE_META[state.aiProfile] || CPU_PROFILE_META[DEFAULT_AI_PROFILE];
-  if (ui.cpuProfileName) ui.cpuProfileName.textContent = profile.name;
-  if (ui.cpuProfileStyle) ui.cpuProfileStyle.textContent = profile.style;
+  const previewCardId = state.cpuPhase1PreviewCardId;
+  const previewCard = previewCardId ? CARD_BY_ID.get(previewCardId) : null;
+
   if (ui.cpuAvatar) {
     ui.cpuAvatar.src = profile.avatar;
     ui.cpuAvatar.alt = profile.name;
+    ui.cpuAvatar.hidden = Boolean(previewCard);
+  }
+
+  if (ui.cpuPhase1PreviewCanvas) {
+    if (previewCard) {
+      ui.cpuPhase1PreviewCanvas.hidden = false;
+      ui.cpuPhase1PreviewCanvas.dataset.cardId = previewCard.id;
+    } else {
+      ui.cpuPhase1PreviewCanvas.hidden = true;
+      delete ui.cpuPhase1PreviewCanvas.dataset.cardId;
+      const ctx = ui.cpuPhase1PreviewCanvas.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, ui.cpuPhase1PreviewCanvas.width, ui.cpuPhase1PreviewCanvas.height);
+      }
+    }
+  }
+
+  if (ui.cpuProfileName) {
+    ui.cpuProfileName.textContent = previewCard ? "CPU Selected" : profile.name;
+  }
+  if (ui.cpuProfileStyle) {
+    ui.cpuProfileStyle.textContent = previewCard ? previewCard.name : profile.style;
   }
 }
 
@@ -2375,6 +2414,7 @@ function renderGameToText() {
           prompt: state.aiPreview.prompt,
         }
       : null,
+    cpu_phase1_preview: state.cpuPhase1PreviewCardId,
     field: state.field.map((card) => card.id),
     player: {
       score: state.players[0].score,
