@@ -1,0 +1,73 @@
+Original prompt: Get rid of need for manuals folder. Go through the code and make sure it no longer requires pulls to the manual.
+
+- Removed all `assets/manual` sheet paths from `SHEET_PATHS`.
+- Removed legacy `SPRITE_LAYOUT` manual fallback mapping.
+- Switched to strict custom-only sprite source (`MONTH_SPRITES`) for all 12 months.
+- Added fail-fast guard in `buildDeck()` if any month sprite mapping is missing.
+- Next: delete `assets/manual` folder and verify no references remain.
+- Deleted `assets/manual` folder from the project.
+- Verified there are no remaining `assets/manual` or legacy manual-sheet identifiers in `game.js`, `index.html`, or `style.css`.
+- Validation limits: runtime smoke test not executed here because local `node` is unavailable in this environment.
+- Implemented 4-of-month sweep capture rule:
+  - Phase 1 (hand play): if 3 matching month cards are on field, playing 4th card captures all 4.
+  - Phase 2 (deck draw): if drawn card matches 3 field cards of same month, captures all 4.
+- Updated human selection flow so only 2-match cases prompt for field choice.
+- Updated AI move evaluation to recognize and value 4-card month sweeps.
+- Added helper `takeAllMonthMatchesFromField(month)`.
+- Validation limits: runtime smoke test not executed here because local `node` is unavailable in this environment.
+- Phase 1 interaction change implemented: human must click field card to collect whenever there is a match (1, 2, or 3).
+- Hand phase now enters selection mode for 1/2/3 matches instead of auto-capturing 1 and 3.
+- Draw phase now enters selection mode for human for 1/2/3 matches; resolution handles 3-match sweep capture.
+- CPU flow unchanged in this phase (still auto-resolves).
+- Validation limits: runtime smoke test not executed because local `node` is unavailable in this environment.
+- Phase 2 implemented: CPU readability/pacing layer.
+- Added staged CPU beats with delays:
+  - think beat before playing hand card
+  - field target preview beat (highlights target/sweep set)
+  - delayed draw resolution beat after deck pull outcome
+  - delayed pass vs koi-koi decision beat
+- Added `state.aiPreview` and render support so field highlights are visible during CPU planning.
+- Added `scheduleAIStep()` and refactored AI timers to support multi-step CPU turn pacing.
+- Added `ai_preview` output in `renderGameToText` for deterministic inspection.
+- Validation limits: runtime smoke test not executed because local `node` is unavailable in this environment.
+- Phase 3 implemented: CPU now simulates field-pick interaction for deck-draw matches.
+- For CPU draw matches (1/2/3), game now shows aiPreview highlight + prompt, pauses, then auto-confirms capture.
+- 3-match draw case now visually previews sweep before capturing all four.
+- Added player-only deck flip phase for draw step:
+  - after phase-1 resolves, drawn card is staged face-down in Recent Deck Pull
+  - player must tap Recent Deck Pull to reveal
+  - reveal lingers briefly before resolving to field/capture selection
+- Added `awaitingDeckFlip` state + draw reveal timer and cleanup hooks.
+- Added deck panel glow/pulse + pointer cursor while awaiting player flip.
+- Added `awaiting_deck_flip` in `renderGameToText`.
+- Implemented deck-flip phase for CPU (Step 2):
+  - CPU now stages face-down draw in Recent Deck Pull
+  - auto-reveals after short delay
+  - lingers face-up briefly
+  - then resolves to no-match field land or existing CPU match-preview/capture flow
+- `awaitingDeckFlip` now covers both player and CPU and is exposed in `renderGameToText` with owner name.
+- Rule update: Sake Cup (9a) no longer counts as a basic/plain card.
+- Kept Sake Cup as seed and preserved Moon/Blossom viewing yaku checks.
+- Updated both scoring and AI captured-stat calculations to remove Sake-as-basic contribution.
+- Added a second card corner indicator for card type beside month indicator.
+- New type badge codes: `BRT` (light), `SED` (seed), `SCR` (scroll), `PLN` (basic/plain).
+- Badge rendering now uses inline badge elements on cards (hand, field, and captured mini cards), not pseudo-content strings.
+- Type badge is elongated and color-coded by type; month badge remains compact and immediately to its right.
+- Mini captured cards also show both badges with scaled-down sizing.
+- Validation limits: unable to run `node`/Playwright in this environment (`node: command not found`), so runtime smoke test was not executed here.
+- Swapped badge positions per UI request: month badge is now on the left, type badge on its right (including mini cards).
+- Capture display now auto-sorts on every render (no mutation of source captured arrays).
+- Display order implemented: bright -> seed -> text scroll -> blue scroll -> red scroll -> plain.
+- Tie-breakers: month ascending, then card id for deterministic left-to-right ordering.
+- Moved type badge to top-right of cards; month badge remains top-left.
+- Applied to both regular and mini cards via CSS-only position updates.
+- Moved rules panel section to render below the bottom title bar (`Hanafuda Koi-Koi` + rules toggle).
+- Rules toggle behavior unchanged, but expanded rules now appear directly underneath that bar.
+- Rules panel scroll behavior hardened: panel has `max-height: 42vh` and `overflow-y: auto`.
+- Converted rules content into expandable accordion sections using native `<details>` blocks.
+- Each major rules group now expands/collapses independently in the rules panel.
+- Added accordion styling for section headers, plus/minus indicator, and section body spacing.
+- Corrected rules text note: Sake Cup does not count as basic.
+- Replaced rules panel text with the new player-friendly instruction set from chat.
+- Kept accordion UI and section-by-section expand/collapse behavior.
+- New sections now include: Objective, Cards and Matching, Setup, Turn Structure, Capture Rules, Yaku/Pass/Koi-Koi, Round-to-Round Start Rules, Scoring, Quick Start.

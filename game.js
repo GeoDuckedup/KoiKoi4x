@@ -221,6 +221,13 @@ const MONTHS = [
   { id: 12, name: "December", flower: "Paulownia" },
 ];
 
+const CARD_TYPE_BADGE_TEXT = {
+  light: "BRT",
+  seed: "SED",
+  scroll: "SCR",
+  basic: "PLN",
+};
+
 const MONTH_CARD_DEFS = [
   {
     month: 1,
@@ -297,7 +304,7 @@ const MONTH_CARD_DEFS = [
   {
     month: 9,
     cards: [
-      { code: "a", name: "Sake Cup", type: "seed", canAlsoBeBasic: true },
+      { code: "a", name: "Sake Cup", type: "seed" },
       { code: "b", name: "Blue Scroll", type: "scroll", scrollKind: "blue" },
       { code: "c", name: "Chrysanthemum Plain A", type: "basic" },
       { code: "d", name: "Chrysanthemum Plain B", type: "basic" },
@@ -335,6 +342,13 @@ const MONTH_CARD_DEFS = [
 const CARD_DECK = buildDeck();
 const CARD_BY_ID = new Map(CARD_DECK.map((card) => [card.id, card]));
 const DRAW_PREVIEW_FLIP_MS = 220;
+const PLAYER_DRAW_REVEAL_LINGER_MS = 420;
+const CPU_DECK_FLIP_DELAY_MS = 320;
+const CPU_DRAW_REVEAL_LINGER_MS = 360;
+const AI_STEP_THINK_MS = 300;
+const AI_STEP_TARGET_MS = 340;
+const AI_STEP_DRAW_RESOLVE_MS = 360;
+const AI_STEP_DECISION_MS = 420;
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -353,6 +367,8 @@ const state = {
   drawPile: [],
   tableMultiplier: 1,
   pendingSelection: null,
+  awaitingDeckFlip: null,
+  aiPreview: null,
   awaitingDecision: null,
   lastKoiCaller: null,
   firstYakuPlayer: null,
@@ -373,6 +389,7 @@ const state = {
   aiProfile: DEFAULT_AI_PROFILE,
   aiTimer: null,
   aiTask: null,
+  drawRevealTimer: null,
 };
 
 const ui = {};
@@ -443,6 +460,7 @@ function cacheUI() {
   ui.cpuProfileStyle = document.getElementById("cpu-profile-style");
   ui.drawPreviewCanvas = document.getElementById("draw-preview-canvas");
   ui.drawPreviewText = document.getElementById("draw-preview-text");
+  ui.drawPreview = document.getElementById("draw-preview");
   ui.playerZone = document.getElementById("player-zone");
   ui.fieldZone = document.getElementById("field-zone");
   ui.handLockNote = document.getElementById("hand-lock-note");
@@ -459,6 +477,7 @@ function cacheUI() {
 function bindUI() {
   ui.playerHand.addEventListener("click", onPlayerHandClick);
   ui.field.addEventListener("click", onFieldClick);
+  ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
   ui.rulesToggle.addEventListener("click", () => {
     ui.rulesPanel.hidden = !ui.rulesPanel.hidden;
@@ -543,11 +562,14 @@ function pickRandomAIProfile() {
 
 function startRound() {
   clearAITask();
+  clearDrawRevealTask();
   resetDrawPreviewFx();
   state.actionLog = [];
   state.moveCounts = [0, 0];
   state.roundOver = false;
   state.pendingSelection = null;
+  state.awaitingDeckFlip = null;
+  state.aiPreview = null;
   state.awaitingDecision = null;
   state.firstYakuPlayer = null;
   state.lastKoiCaller = null;
@@ -650,7 +672,7 @@ function detectLuckyHand(hand) {
 }
 
 function onPlayerHandClick(event) {
-  if (!state.ready || state.roundOver || state.awaitingDecision) return;
+  if (!state.ready || state.roundOver || state.awaitingDecision || state.awaitingDeckFlip) return;
   if (state.currentPlayer !== 0) return;
   if (state.pendingSelection) return;
 
@@ -663,7 +685,13 @@ function onPlayerHandClick(event) {
   if (!card) return;
 
   const matches = getFieldMatches(card.month);
-  if (matches.length > 1) {
+  if (matches.length > 0) {
+    const prompt =
+      matches.length === 1
+        ? `Tap the highlighted ${describeMonth(card.month)} field card to capture.`
+        : matches.length === 3
+          ? `Tap any highlighted ${describeMonth(card.month)} field card to capture all four cards.`
+          : `Choose a ${describeMonth(card.month)} field card to pair.`;
     beginPendingSelection(
       {
         type: "handMatch",
@@ -671,15 +699,16 @@ function onPlayerHandClick(event) {
         cardId,
         options: matches.map((entry) => entry.id),
       },
-      `Choose a ${describeMonth(card.month)} field card to pair.`
+      prompt
     );
     return;
   }
 
-  executePlayFromHand(0, cardId, matches[0] ? matches[0].id : null);
+  executePlayFromHand(0, cardId, null);
 }
 
 function onFieldClick(event) {
+  if (state.awaitingDeckFlip) return;
   const cardNode = event.target.closest("[data-card-id]");
   if (!cardNode) return;
 
@@ -692,6 +721,30 @@ function onFieldClick(event) {
   } else if (pending.type === "drawMatch") {
     resolveDrawMatch(pending.playerIndex, pending.drawnCard, selectedId, pending.moveNumber);
   }
+}
+
+function onDrawPreviewClick() {
+  const flip = state.awaitingDeckFlip;
+  if (!flip) return;
+  if (flip.playerIndex !== 0 || state.currentPlayer !== 0) return;
+  if (flip.revealed || state.roundOver || state.awaitingDecision || state.pendingSelection) return;
+
+  flip.revealed = true;
+  const drawn = flip.drawnCard;
+  state.drawPreview = {
+    cardId: drawn.id,
+    text: `Pulled ${drawn.name}.`,
+  };
+  renderAll();
+
+  clearDrawRevealTask();
+  state.drawRevealTimer = setTimeout(() => {
+    state.drawRevealTimer = null;
+    if (state.roundOver || !state.awaitingDeckFlip || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
+    const { playerIndex, moveNumber } = state.awaitingDeckFlip;
+    state.awaitingDeckFlip = null;
+    resolveRevealedDrawForPlayer(playerIndex, moveNumber, drawn);
+  }, PLAYER_DRAW_REVEAL_LINGER_MS);
 }
 
 function beginPendingSelection(pending, logMessage) {
@@ -720,6 +773,7 @@ function focusPendingFieldChoice() {
 
 function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
   state.pendingSelection = null;
+  state.aiPreview = null;
   const moveNumber = nextMoveNumber(playerIndex);
 
   const player = state.players[playerIndex];
@@ -730,7 +784,10 @@ function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
   let captured = [];
   const matches = getFieldMatches(card.month);
 
-  if (forcedFieldId) {
+  if (matches.length === 3) {
+    captured = [card, ...takeAllMonthMatchesFromField(card.month)];
+    state.message = `${player.name} captured all four ${describeMonth(card.month)} cards.`;
+  } else if (forcedFieldId) {
     const fieldIndex = state.field.findIndex((entry) => entry.id === forcedFieldId);
     if (fieldIndex !== -1) {
       const fieldCard = state.field.splice(fieldIndex, 1)[0];
@@ -772,6 +829,58 @@ function processDrawStep(playerIndex, moveNumber) {
   const drawn = state.drawPile.shift();
   const matches = getFieldMatches(drawn.month);
 
+  if (state.players[playerIndex].isHuman) {
+    state.awaitingDeckFlip = {
+      playerIndex,
+      moveNumber,
+      drawnCard: drawn,
+      revealed: false,
+    };
+    state.drawPreview = {
+      cardId: null,
+      text: "Tap Recent Deck Pull to reveal.",
+    };
+    state.message += " Draw from deck ready.";
+    addSystemLog("Tap Recent Deck Pull to reveal the drawn card.");
+    renderAll();
+    return;
+  }
+  state.awaitingDeckFlip = {
+    playerIndex,
+    moveNumber,
+    drawnCard: drawn,
+    revealed: false,
+  };
+  state.drawPreview = {
+    cardId: null,
+    text: "CPU is preparing deck reveal.",
+  };
+  addSystemLog("CPU draws from deck.");
+  renderAll();
+
+  scheduleAIStep(CPU_DECK_FLIP_DELAY_MS, () => {
+    const flip = state.awaitingDeckFlip;
+    if (!flip || flip.playerIndex !== playerIndex || state.roundOver || state.currentPlayer !== playerIndex) return;
+    flip.revealed = true;
+    state.drawPreview = {
+      cardId: drawn.id,
+      text: `Pulled ${drawn.name}.`,
+    };
+    renderAll();
+
+    scheduleAIStep(CPU_DRAW_REVEAL_LINGER_MS, () => {
+      const active = state.awaitingDeckFlip;
+      if (!active || active.playerIndex !== playerIndex || active.drawnCard.id !== drawn.id) return;
+      if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision || state.pendingSelection) return;
+      state.awaitingDeckFlip = null;
+      resolveRevealedDrawForCpu(playerIndex, moveNumber, drawn);
+    });
+  });
+}
+
+function resolveRevealedDrawForPlayer(playerIndex, moveNumber, drawn) {
+  const matches = getFieldMatches(drawn.month);
+
   if (matches.length === 0) {
     state.field.push(drawn);
     state.message += ` Flip ${drawn.name}, no match.`;
@@ -783,51 +892,65 @@ function processDrawStep(playerIndex, moveNumber) {
     return;
   }
 
-  if (matches.length === 1) {
-    const fieldIndex = state.field.findIndex((entry) => entry.id === matches[0].id);
-    const fieldCard = state.field.splice(fieldIndex, 1)[0];
-    addCapturedCards(playerIndex, [drawn, fieldCard]);
-    state.message += ` Flip ${drawn.name}, capture ${fieldCard.name}.`;
-    state.drawPreview = {
-      cardId: drawn.id,
-      text: `Pulled ${drawn.name}. Matched ${fieldCard.name}.`,
-    };
-    finalizeTurn(playerIndex, moveNumber);
-    return;
-  }
-
-  if (state.players[playerIndex].isHuman) {
-    state.drawPreview = {
-      cardId: drawn.id,
-      text: `Pulled ${drawn.name}. Choose a matching field card.`,
-    };
-    beginPendingSelection(
-      {
-        type: "drawMatch",
-        playerIndex,
-        drawnCard: drawn,
-        moveNumber,
-        options: matches.map((entry) => entry.id),
-      },
-      `${state.message} Flip ${drawn.name}. Choose the matching field card.`
-    );
-    return;
-  }
-
-  const chosen = chooseBestMatchForAI(playerIndex, drawn, matches);
-  const fieldIndex = state.field.findIndex((entry) => entry.id === chosen.id);
-  const fieldCard = state.field.splice(fieldIndex, 1)[0];
-  addCapturedCards(playerIndex, [drawn, fieldCard]);
-  state.message += ` Flip ${drawn.name}, capture ${fieldCard.name}.`;
+  const drawChoiceText =
+    matches.length === 1
+      ? `Pulled ${drawn.name}. Tap highlighted field card to capture.`
+      : matches.length === 3
+        ? `Pulled ${drawn.name}. Tap any highlighted field card to sweep all four.`
+        : `Pulled ${drawn.name}. Choose a matching field card.`;
   state.drawPreview = {
     cardId: drawn.id,
-    text: `Pulled ${drawn.name}. Matched ${fieldCard.name}.`,
+    text: drawChoiceText,
   };
-  finalizeTurn(playerIndex, moveNumber);
+  const prompt =
+    matches.length === 1
+      ? `${state.message} Flip ${drawn.name}. Tap the highlighted field card to capture.`
+      : matches.length === 3
+        ? `${state.message} Flip ${drawn.name}. Tap any highlighted field card to capture all four.`
+        : `${state.message} Flip ${drawn.name}. Choose the matching field card.`;
+  beginPendingSelection(
+    {
+      type: "drawMatch",
+      playerIndex,
+      drawnCard: drawn,
+      moveNumber,
+      options: matches.map((entry) => entry.id),
+    },
+    prompt
+  );
+}
+
+function resolveRevealedDrawForCpu(playerIndex, moveNumber, drawn) {
+  const matches = getFieldMatches(drawn.month);
+  if (matches.length === 0) {
+    state.field.push(drawn);
+    state.message += ` Flip ${drawn.name}, no match.`;
+    state.drawPreview = {
+      cardId: drawn.id,
+      text: `Pulled ${drawn.name}. No match, landed on field.`,
+    };
+    scheduleCpuDrawFinalize(playerIndex, moveNumber);
+    return;
+  }
+
+  previewAndResolveCpuDrawMatch(playerIndex, moveNumber, drawn, matches);
 }
 
 function resolveDrawMatch(playerIndex, drawnCard, fieldCardId, moveNumber) {
   state.pendingSelection = null;
+  const matches = getFieldMatches(drawnCard.month);
+
+  if (matches.length === 3) {
+    const captured = [drawnCard, ...takeAllMonthMatchesFromField(drawnCard.month)];
+    addCapturedCards(playerIndex, captured);
+    state.message += ` Captured all four ${describeMonth(drawnCard.month)} cards.`;
+    state.drawPreview = {
+      cardId: drawnCard.id,
+      text: `Pulled ${drawnCard.name}. Swept all four ${describeMonth(drawnCard.month)} cards.`,
+    };
+    finalizeTurn(playerIndex, moveNumber);
+    return;
+  }
 
   const fieldIndex = state.field.findIndex((entry) => entry.id === fieldCardId);
   if (fieldIndex !== -1) {
@@ -855,6 +978,96 @@ function addCapturedCards(playerIndex, cards) {
   for (const card of cards) {
     player.captured.push(card);
   }
+}
+
+function takeAllMonthMatchesFromField(month) {
+  const matches = state.field.filter((card) => card.month === month);
+  if (!matches.length) return [];
+  const ids = new Set(matches.map((card) => card.id));
+  state.field = state.field.filter((card) => !ids.has(card.id));
+  return matches;
+}
+
+function scheduleCpuDrawFinalize(playerIndex, moveNumber) {
+  renderAll();
+  scheduleAIStep(AI_STEP_DRAW_RESOLVE_MS, () => {
+    if (
+      state.roundOver ||
+      state.currentPlayer !== playerIndex ||
+      state.awaitingDecision ||
+      state.pendingSelection ||
+      state.awaitingDeckFlip
+    ) {
+      return;
+    }
+    finalizeTurn(playerIndex, moveNumber);
+  });
+}
+
+function previewAndResolveCpuDrawMatch(playerIndex, moveNumber, drawnCard, matches) {
+  let options = [];
+  let selectedId = null;
+  let prompt = "";
+
+  if (matches.length === 3) {
+    options = matches.map((entry) => entry.id);
+    selectedId = options[0] || null;
+    prompt = `CPU prepares a ${describeMonth(drawnCard.month)} sweep from deck draw.`;
+  } else if (matches.length === 2) {
+    const chosen = chooseBestMatchForAI(playerIndex, drawnCard, matches);
+    selectedId = chosen.id;
+    options = [selectedId];
+    prompt = `CPU picks ${chosen.name} for drawn ${drawnCard.name}.`;
+  } else {
+    selectedId = matches[0].id;
+    options = [selectedId];
+    prompt = `CPU picks ${matches[0].name} for drawn ${drawnCard.name}.`;
+  }
+
+  state.aiPreview = {
+    options,
+    prompt,
+  };
+  addSystemLog(prompt);
+  renderAll();
+
+  scheduleAIStep(AI_STEP_TARGET_MS, () => {
+    if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision || state.pendingSelection) {
+      return;
+    }
+    state.aiPreview = null;
+
+    if (matches.length === 3) {
+      const captured = [drawnCard, ...takeAllMonthMatchesFromField(drawnCard.month)];
+      addCapturedCards(playerIndex, captured);
+      state.message += ` Flip ${drawnCard.name}, captured all four ${describeMonth(drawnCard.month)} cards.`;
+      state.drawPreview = {
+        cardId: drawnCard.id,
+        text: `Pulled ${drawnCard.name}. Swept all four ${describeMonth(drawnCard.month)} cards.`,
+      };
+      scheduleCpuDrawFinalize(playerIndex, moveNumber);
+      return;
+    }
+
+    const fieldIndex = state.field.findIndex((entry) => entry.id === selectedId);
+    if (fieldIndex !== -1) {
+      const fieldCard = state.field.splice(fieldIndex, 1)[0];
+      addCapturedCards(playerIndex, [drawnCard, fieldCard]);
+      state.message += ` Flip ${drawnCard.name}, capture ${fieldCard.name}.`;
+      state.drawPreview = {
+        cardId: drawnCard.id,
+        text: `Pulled ${drawnCard.name}. Matched ${fieldCard.name}.`,
+      };
+    } else {
+      state.field.push(drawnCard);
+      state.message += ` Flip ${drawnCard.name}, no match.`;
+      state.drawPreview = {
+        cardId: drawnCard.id,
+        text: `Pulled ${drawnCard.name}. No match, landed on field.`,
+      };
+    }
+    scheduleCpuDrawFinalize(playerIndex, moveNumber);
+  });
 }
 
 function evaluateYakuProgress(playerIndex) {
@@ -931,17 +1144,23 @@ function handleNewYakuEvent(
   );
 
   if (!state.players[playerIndex].isHuman) {
-    const action = chooseAIDecision(decision);
-    if (action === "pass" && decision.canPass) {
-      logPlayerMove(
-        playerIndex,
-        decision.moveNumber,
-        `Pass at ${decision.passMultiplier}x with ${decision.yakuText}.`
-      );
-      endRoundWithWinner(playerIndex, decision.points, decision.passMultiplier, "passed");
-      return;
-    }
-    applyKoiAndContinue(decision);
+    state.message = `${state.players[playerIndex].name} is deciding: Pass or Koi-Koi.`;
+    addSystemLog(state.message);
+    renderAll();
+    scheduleAIStep(AI_STEP_DECISION_MS, () => {
+      if (state.roundOver || state.currentPlayer !== playerIndex) return;
+      const action = chooseAIDecision(decision);
+      if (action === "pass" && decision.canPass) {
+        logPlayerMove(
+          playerIndex,
+          decision.moveNumber,
+          `Pass at ${decision.passMultiplier}x with ${decision.yakuText}.`
+        );
+        endRoundWithWinner(playerIndex, decision.points, decision.passMultiplier, "passed");
+        return;
+      }
+      applyKoiAndContinue(decision);
+    });
     return;
   }
 
@@ -1021,7 +1240,7 @@ function buildCapturedStats(captured, roundMonth) {
   const lights = captured.filter((card) => card.type === "light").length;
   const seeds = captured.filter((card) => card.type === "seed").length;
   const scrolls = captured.filter((card) => card.type === "scroll").length;
-  const basics = captured.filter((card) => card.type === "basic").length + (ids.has("9a") ? 1 : 0);
+  const basics = captured.filter((card) => card.type === "basic").length;
   const roundMonthCount = captured.filter((card) => card.month === roundMonth).length;
   return { ids, lights, seeds, scrolls, basics, roundMonthCount };
 }
@@ -1247,8 +1466,10 @@ function resolveDeckExhaustion() {
 
 function endRoundDraw() {
   clearAITask();
+  clearDrawRevealTask();
   state.roundOver = true;
   state.pendingSelection = null;
+  state.awaitingDeckFlip = null;
   state.awaitingDecision = null;
   state.lastKoiCaller = null;
   state.firstYakuPlayer = null;
@@ -1274,8 +1495,10 @@ function endRoundDraw() {
 
 function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
   clearAITask();
+  clearDrawRevealTask();
   state.roundOver = true;
   state.pendingSelection = null;
+  state.awaitingDeckFlip = null;
   state.awaitingDecision = null;
   state.lastKoiCaller = null;
   state.firstYakuPlayer = null;
@@ -1330,15 +1553,64 @@ function onNextGame() {
 
 function queueAITurn(delayMs) {
   clearAITask();
-  state.aiTask = () => {
+  scheduleAIStep(delayMs, () => {
     if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
     performAITurn();
-  };
+  });
+}
+
+function performAITurn() {
+  const choice = chooseAICard(1);
+  if (!choice || !choice.card) return;
+  state.message = "CPU is choosing a card.";
+  addSystemLog(state.message);
+  renderAll();
+
+  scheduleAIStep(AI_STEP_THINK_MS, () => {
+    if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+
+    const matches = getFieldMatches(choice.card.month);
+    if (matches.length > 0) {
+      const targetOptions =
+        matches.length === 3
+          ? matches.map((entry) => entry.id)
+          : matches.length === 2 && choice.targetFieldId
+            ? [choice.targetFieldId]
+            : [matches[0].id];
+      const aiPrompt =
+        matches.length === 3
+          ? `CPU lines up a ${describeMonth(choice.card.month)} sweep.`
+          : matches.length === 2 && choice.targetFieldId
+            ? `CPU targets ${CARD_BY_ID.get(choice.targetFieldId)?.name || "a field card"}.`
+            : `CPU targets ${matches[0].name}.`;
+      state.aiPreview = {
+        options: targetOptions,
+        prompt: aiPrompt,
+      };
+      addSystemLog(aiPrompt);
+      renderAll();
+      scheduleAIStep(AI_STEP_TARGET_MS, () => {
+        if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+        state.aiPreview = null;
+        executePlayFromHand(1, choice.card.id, choice.targetFieldId || null);
+      });
+      return;
+    }
+
+    executePlayFromHand(1, choice.card.id, null);
+  });
+}
+
+function scheduleAIStep(delayMs, task) {
+  if (state.aiTimer) {
+    clearTimeout(state.aiTimer);
+  }
+  state.aiTask = task;
   state.aiTimer = setTimeout(() => {
-    const task = state.aiTask;
+    const next = state.aiTask;
     state.aiTask = null;
     state.aiTimer = null;
-    if (task) task();
+    if (next) next();
   }, delayMs);
 }
 
@@ -1348,12 +1620,14 @@ function clearAITask() {
   }
   state.aiTimer = null;
   state.aiTask = null;
+  state.aiPreview = null;
 }
 
-function performAITurn() {
-  const choice = chooseAICard(1);
-  if (!choice || !choice.card) return;
-  executePlayFromHand(1, choice.card.id, choice.targetFieldId || null);
+function clearDrawRevealTask() {
+  if (state.drawRevealTimer) {
+    clearTimeout(state.drawRevealTimer);
+  }
+  state.drawRevealTimer = null;
 }
 
 function chooseAICard(playerIndex) {
@@ -1372,6 +1646,14 @@ function chooseAICard(playerIndex) {
       continue;
     }
 
+    if (matches.length === 3) {
+      const score = evaluateAIMoveOption(playerIndex, card, null, profile, matches);
+      if (!best || score > best.score) {
+        best = { card, targetFieldId: null, score };
+      }
+      continue;
+    }
+
     for (const fieldCard of matches) {
       const score = evaluateAIMoveOption(playerIndex, card, fieldCard, profile);
       if (!best || score > best.score) {
@@ -1382,28 +1664,37 @@ function chooseAICard(playerIndex) {
   return best;
 }
 
-function evaluateAIMoveOption(playerIndex, card, fieldCard, profile) {
+function evaluateAIMoveOption(playerIndex, card, fieldCard, profile, fieldCardsOverride = null) {
   const player = state.players[playerIndex];
   const opponentIndex = playerIndex === 0 ? 1 : 0;
   const opponent = state.players[opponentIndex];
   const weights = profile.card;
   const roundMonth = state.gameNumber;
+  const fieldCards = fieldCardsOverride || (fieldCard ? [fieldCard] : null);
 
   const beforeYakuPoints = computeYaku(player.captured, roundMonth).points;
   const beforePotential = estimateYakuThreatScore(player.captured, roundMonth);
 
-  const capturedAfter = fieldCard ? [...player.captured, card, fieldCard] : [...player.captured];
+  const capturedAfter = fieldCards ? [...player.captured, card, ...fieldCards] : [...player.captured];
   const afterYakuPoints = computeYaku(capturedAfter, roundMonth).points;
   const afterPotential = estimateYakuThreatScore(capturedAfter, roundMonth);
 
-  const immediate = fieldCard
-    ? typeValue(card.type) + typeValue(fieldCard.type) * 1.1
+  const capturedFieldValue = fieldCards
+    ? fieldCards.reduce((sum, entry) => sum + typeValue(entry.type), 0)
+    : 0;
+  const immediate = fieldCards
+    ? typeValue(card.type) +
+      capturedFieldValue * 1.1 +
+      (fieldCards.length >= 3 ? 2.2 : 0)
     : -weights.expose * (0.45 + typeValue(card.type) * 0.32);
   const yakuGain = Math.max(0, afterYakuPoints - beforeYakuPoints);
   const comboGain = afterPotential - beforePotential;
 
-  const denial = fieldCard
-    ? estimateCardThreatForPlayer(fieldCard, opponent.captured, roundMonth)
+  const denial = fieldCards
+    ? fieldCards.reduce(
+        (sum, entry) => sum + estimateCardThreatForPlayer(entry, opponent.captured, roundMonth),
+        0
+      )
     : -estimateCardThreatForPlayer(card, opponent.captured, roundMonth) * 0.7;
   const monthBonus = card.month === roundMonth ? 1 : 0;
   const lightBonus = card.type === "light" ? weights.lightBonus : 0;
@@ -1439,6 +1730,30 @@ function typeValue(type) {
   if (type === "seed") return 4;
   if (type === "scroll") return 3;
   return 1;
+}
+
+function capturedDisplayGroupRank(card) {
+  if (card.type === "light") return 0;
+  if (card.type === "seed") return 1;
+  if (card.type === "scroll") {
+    if (card.scrollKind === "redText") return 2;
+    if (card.scrollKind === "blue") return 3;
+    if (card.scrollKind === "red") return 4;
+    return 5;
+  }
+  return 6;
+}
+
+function compareCapturedDisplayOrder(a, b) {
+  const groupDiff = capturedDisplayGroupRank(a) - capturedDisplayGroupRank(b);
+  if (groupDiff !== 0) return groupDiff;
+  const monthDiff = a.month - b.month;
+  if (monthDiff !== 0) return monthDiff;
+  return a.id.localeCompare(b.id);
+}
+
+function getSortedCapturedForDisplay(cards) {
+  return cards.slice().sort(compareCapturedDisplayOrder);
 }
 
 function getFieldMatches(month) {
@@ -1529,7 +1844,7 @@ function computeYaku(captured, roundMonth) {
     triggerKeys.push("scrollsBase");
   }
 
-  const basicCount = basics.length + (ids.has("9a") ? 1 : 0);
+  const basicCount = basics.length;
   if (basicCount >= 10) {
     const basicPoints = 1 + (basicCount - 10);
     points += basicPoints;
@@ -1612,6 +1927,15 @@ function formatYakuLine(yaku) {
   return `${yaku.points} pts: ${yaku.names.join(", ")}`;
 }
 
+function getCardTypeBadgeText(type) {
+  return CARD_TYPE_BADGE_TEXT[type] || "PLN";
+}
+
+function renderBadgedCardContent(card) {
+  const typeBadge = getCardTypeBadgeText(card.type);
+  return `<span class="card-type-badge card-type-${card.type}" aria-hidden="true">${typeBadge}</span><span class="card-month-badge" aria-hidden="true">${card.month}</span><canvas width="138" height="170" data-card-id="${card.id}"></canvas>`;
+}
+
 function renderHands() {
   const cpuCount = state.players[1].hand.length;
   ui.cpuHand.innerHTML = Array.from({ length: 8 }, (_, i) => {
@@ -1621,11 +1945,20 @@ function renderHands() {
 
   const pending = state.pendingSelection;
   const inChoiceMode = Boolean(pending && pending.playerIndex === 0);
-  const selectable = state.currentPlayer === 0 && !state.roundOver && !state.awaitingDecision && !inChoiceMode;
+  const waitingDeckFlip =
+    Boolean(state.awaitingDeckFlip) &&
+    state.awaitingDeckFlip.playerIndex === 0 &&
+    !state.awaitingDeckFlip.revealed;
+  const inputLocked = inChoiceMode || waitingDeckFlip;
+  const selectable =
+    state.currentPlayer === 0 &&
+    !state.roundOver &&
+    !state.awaitingDecision &&
+    !inputLocked;
   if (ui.playerZone) {
     ui.playerZone.classList.toggle("turn-ready", selectable);
   }
-  ui.playerHand.classList.toggle("locked", inChoiceMode);
+  ui.playerHand.classList.toggle("locked", inputLocked);
 
   ui.playerHand.innerHTML = state.players[0].hand
     .map((card) => {
@@ -1634,25 +1967,34 @@ function renderHands() {
       if (selectable) classes.push("selectable");
       if (isPending) classes.push("pending", "choice-source");
       const disabled = selectable ? "" : " disabled";
-      return `<button type="button" class="${classes.join(" ")}" data-card-id="${card.id}" data-badge="${card.month}"${disabled}><canvas width="138" height="170" data-card-id="${card.id}"></canvas></button>`;
+      return `<button type="button" class="${classes.join(" ")}" data-card-id="${card.id}" data-card-type="${card.type}"${disabled}>${renderBadgedCardContent(card)}</button>`;
     })
     .join("");
 }
 
 function renderField() {
-  const pending = state.pendingSelection;
-  const inChoiceMode = Boolean(pending && pending.playerIndex === 0);
+  const pending =
+    state.pendingSelection && state.pendingSelection.playerIndex === 0
+      ? state.pendingSelection
+      : null;
+  const aiPreview = !pending && state.aiPreview ? state.aiPreview : null;
+  const activeOptions = pending ? pending.options : aiPreview ? aiPreview.options : null;
+  const inChoiceMode = Boolean(activeOptions && activeOptions.length);
+  const humanSelectable = Boolean(pending);
   ui.field.innerHTML = state.field
     .map((card) => {
-      const selectable = inChoiceMode && pending.options.includes(card.id);
+      const highlighted = inChoiceMode && activeOptions.includes(card.id);
       const classes = ["card", "badged"];
-      if (selectable) {
-        classes.push("selectable", "choice-target");
+      if (highlighted) {
+      if (humanSelectable) {
+          classes.push("selectable");
+        }
+        classes.push("choice-target");
       } else if (inChoiceMode) {
         classes.push("choice-muted");
       }
-      const disabled = selectable ? "" : " disabled";
-      return `<button type="button" class="${classes.join(" ")}" data-card-id="${card.id}" data-badge="${card.month}"${disabled}><canvas width="138" height="170" data-card-id="${card.id}"></canvas></button>`;
+      const disabled = humanSelectable && highlighted ? "" : " disabled";
+      return `<button type="button" class="${classes.join(" ")}" data-card-id="${card.id}" data-card-type="${card.type}"${disabled}>${renderBadgedCardContent(card)}</button>`;
     })
     .join("");
 }
@@ -1669,6 +2011,9 @@ function renderCpuProfile() {
 
 function renderDrawPreview() {
   if (!ui.drawPreviewCanvas || !ui.drawPreviewText) return;
+  if (ui.drawPreview) {
+    ui.drawPreview.classList.toggle("awaiting-flip", Boolean(state.awaitingDeckFlip && !state.awaitingDeckFlip.revealed));
+  }
   ui.drawPreviewText.textContent = state.drawPreview.text;
   const ctx = ui.drawPreviewCanvas.getContext("2d");
   if (!ctx) return;
@@ -1676,7 +2021,11 @@ function renderDrawPreview() {
   if (!state.drawPreview.cardId) {
     resetDrawPreviewFx();
     delete ui.drawPreviewCanvas.dataset.cardId;
-    ctx.clearRect(0, 0, ui.drawPreviewCanvas.width, ui.drawPreviewCanvas.height);
+    if (state.awaitingDeckFlip && !state.awaitingDeckFlip.revealed) {
+      paintPreviewBack(ctx, ui.drawPreviewCanvas.width, ui.drawPreviewCanvas.height);
+    } else {
+      ctx.clearRect(0, 0, ui.drawPreviewCanvas.width, ui.drawPreviewCanvas.height);
+    }
     return;
   }
 
@@ -1775,14 +2124,31 @@ function getChoicePromptText(pending) {
 
 function renderChoiceMode() {
   const pending = state.pendingSelection && state.pendingSelection.playerIndex === 0 ? state.pendingSelection : null;
-  const active = Boolean(pending);
+  const aiPreview = !pending && state.aiPreview ? state.aiPreview : null;
+  const waitingDeckFlip =
+    Boolean(state.awaitingDeckFlip) &&
+    state.awaitingDeckFlip.playerIndex === 0 &&
+    !state.awaitingDeckFlip.revealed;
+  const active = Boolean(pending || aiPreview);
 
   if (ui.fieldHelper) {
     ui.fieldHelper.hidden = !active;
-    ui.fieldHelper.textContent = active ? `Choose 1 of ${pending.options.length}` : "";
+    ui.fieldHelper.textContent = pending
+      ? `Choose 1 of ${pending.options.length}`
+      : aiPreview
+        ? aiPreview.prompt
+        : "";
   }
   if (ui.handLockNote) {
-    ui.handLockNote.hidden = !active;
+    if (pending) {
+      ui.handLockNote.hidden = false;
+      ui.handLockNote.textContent = "Finish field choice above.";
+    } else if (waitingDeckFlip) {
+      ui.handLockNote.hidden = false;
+      ui.handLockNote.textContent = "Reveal the deck card above.";
+    } else {
+      ui.handLockNote.hidden = true;
+    }
   }
   if (ui.fieldZone) {
     ui.fieldZone.classList.toggle("choice-mode", active);
@@ -1790,17 +2156,20 @@ function renderChoiceMode() {
 }
 
 function renderCaptured() {
-  ui.cpuCaptured.innerHTML = state.players[1].captured
+  const cpuCaptured = getSortedCapturedForDisplay(state.players[1].captured);
+  const playerCaptured = getSortedCapturedForDisplay(state.players[0].captured);
+
+  ui.cpuCaptured.innerHTML = cpuCaptured
     .map(
       (card) =>
-        `<div class="card mini badged" data-badge="${card.month}"><canvas width="138" height="170" data-card-id="${card.id}"></canvas></div>`
+        `<div class="card mini badged" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
     )
     .join("");
 
-  ui.playerCaptured.innerHTML = state.players[0].captured
+  ui.playerCaptured.innerHTML = playerCaptured
     .map(
       (card) =>
-        `<div class="card mini badged" data-badge="${card.month}"><canvas width="138" height="170" data-card-id="${card.id}"></canvas></div>`
+        `<div class="card mini badged" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`
     )
     .join("");
 }
@@ -1991,6 +2360,21 @@ function renderGameToText() {
             prompt: getChoicePromptText(state.pendingSelection),
           }
         : null,
+    awaiting_deck_flip:
+      state.awaitingDeckFlip
+        ? {
+            player: state.players[state.awaitingDeckFlip.playerIndex].name,
+            move_number: state.awaitingDeckFlip.moveNumber,
+            revealed: state.awaitingDeckFlip.revealed,
+            drawn_card: state.awaitingDeckFlip.drawnCard.id,
+          }
+        : null,
+    ai_preview: state.aiPreview
+      ? {
+          options: state.aiPreview.options,
+          prompt: state.aiPreview.prompt,
+        }
+      : null,
     field: state.field.map((card) => card.id),
     player: {
       score: state.players[0].score,

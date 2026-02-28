@@ -106,84 +106,124 @@
         </ol>
       </section>
 
-      <section id="rules-panel" class="rules-panel" hidden>
-        <div class="rules-pages">
-          <article class="rules-copy">
-            <h2>House Rules</h2>
-            <p>These are the active rules used by this version.</p>
-
-            <h3>Round Flow</h3>
-            <ul>
-              <li>Match has 12 rounds (January through December).</li>
-              <li>Each round starts with table multiplier at <strong>1x</strong>.</li>
-              <li>On your turn: play a card, resolve month match on field, then flip one deck card and resolve its match.</li>
-            </ul>
-
-            <h3>Koi-Koi Decision</h3>
-            <ul>
-              <li>When a player forms a <strong>new yaku</strong>, they may pass or call Koi-Koi.</li>
-              <li><strong>Pass</strong>: round ends, scorer gets <code>yaku points x table multiplier</code>.</li>
-              <li><strong>Koi-Koi</strong>: round continues and multiplier increases by 1 (max 4x).</li>
-              <li>Koi-Koi can be called multiple times by either player in one round.</li>
-            </ul>
-
-            <h3>Add-On Rule</h3>
-            <ul>
-              <li>Point add-ons (example: extra seed/scroll/basic after base threshold) increase points only.</li>
-              <li>Add-ons are not a new yaku event and do <strong>not</strong> open pass/Koi-Koi choice.</li>
-            </ul>
-
-            <h3>Deck Exhaustion</h3>
-            <ul>
-              <li>If the deck and hands run out before a pass, only the <strong>last Koi-Koi caller</strong> scores.</li>
-              <li>They score at current table multiplier.</li>
-            </ul>
-
-            <h3>Next Round Starter</h3>
-            <ul>
-              <li>If winner scored at <strong>3x or 4x</strong>, winner starts next round.</li>
-              <li>If winner scored at <strong>1x or 2x</strong>, loser starts next round.</li>
-            </ul>
-
-            <h3>1x Carryover Bonus</h3>
-            <ul>
-              <li>If previous round was won at <strong>1x</strong>, the loser gets next round first-yaku privilege.</li>
-              <li>That player may pass their first new yaku at <strong>2x</strong>, or call Koi-Koi to jump table to <strong>3x</strong>.</li>
-              <li>If the previous 1x winner gets first yaku instead, normal options apply (pass at 1x or Koi-Koi to 2x).</li>
-            </ul>
-
-            <h3>Round 12 Leader Restriction</h3>
-            <ul>
-              <li>If a player is ahead at start of round 12 and forms the first yaku at pass value 1x, they are forced to Koi-Koi.</li>
-              <li>Exception: if that player has the special 2x first-yaku privilege, they may pass.</li>
-            </ul>
-
-            <h3>Yaku Points</h3>
-            <ul>
-              <li>Five Lights: 10</li>
-              <li>Four Lights: 8 (or 7 with rain light)</li>
-              <li>Three Lights (no rain): 5</li>
-              <li>Blossom Viewing (Cherry Curtain + Sake Cup): 5</li>
-              <li>Moon Viewing (Moon Light + Sake Cup): 5</li>
-              <li>Animal Trio set: 5</li>
-              <li>Red Scroll set: 5</li>
-              <li>Blue Scroll set: 5</li>
-              <li>Red and Blue Scroll sets together: 10</li>
-              <li>Seeds: 5 seeds = 3, then +1 per extra seed</li>
-              <li>Scrolls: 5 scrolls = 1, then +1 per extra scroll</li>
-              <li>Basics: 10 basics = 1, then +1 per extra basic (Sake Cup can count as basic)</li>
-              <li>Round Month Sweep (all 4 cards of current round month): 5</li>
-            </ul>
-          </article>
-        </div>
-      </section>
-
       <header class="top">
         <div>
           <h1>Hanafuda Koi-Koi</h1>
         </div>
         <button id="rules-toggle" class="ghost" type="button">Rules</button>
       </header>
+
+      <section id="rules-panel" class="rules-panel" hidden>
+        <div class="rules-pages">
+          <article class="rules-copy">
+            <h2>How To Play</h2>
+            <p>Everything below is written for new players and matches this version's house rules.</p>
+
+            <details class="rules-section" open>
+              <summary>Objective</summary>
+              <ul>
+                <li>Win points by making card combinations called <strong>yaku</strong>.</li>
+                <li>A full match is 12 rounds (January through December).</li>
+                <li>The highest total score after 12 rounds wins.</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Cards and Matching</summary>
+              <ul>
+                <li>The deck has 48 cards: 12 months, 4 cards per month.</li>
+                <li>You match cards by <strong>month</strong>.</li>
+                <li>Type markers on cards: <strong>BRT</strong> = bright, <strong>SED</strong> = seed, <strong>SCR</strong> = scroll, <strong>PLN</strong> = plain.</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Setup (Each Round)</summary>
+              <ul>
+                <li>Each player gets 8 cards in hand.</li>
+                <li>8 cards are placed face-up on the field.</li>
+                <li>Remaining cards form the draw deck.</li>
+                <li>Round month follows round number (Round 1 January ... Round 12 December).</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Turn Structure</summary>
+              <ul>
+                <li><strong>Phase 1:</strong> Play one card from hand and resolve month matches.</li>
+                <li><strong>Phase 2:</strong> Draw one card from deck and resolve month matches.</li>
+                <li>If no match is made, that card stays on the field.</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Capture Rules</summary>
+              <ul>
+                <li>If exactly 1 matching field card exists, capture both cards.</li>
+                <li>If exactly 2 matching field cards exist, choose 1 field card to capture.</li>
+                <li>If exactly 3 matching field cards exist, capture all 4 cards.</li>
+                <li><strong>4-of-month sweep:</strong> if your played/drawn card is the 4th while other 3 are on field, capture all 4.</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Yaku, Pass, and Koi-Koi</summary>
+              <ul>
+                <li>When you form a <strong>new yaku</strong>, choose to <strong>Pass</strong> or call <strong>Koi-Koi</strong>.</li>
+                <li><strong>Pass:</strong> round ends and scorer gets <code>yaku points x table multiplier</code>.</li>
+                <li><strong>Koi-Koi:</strong> round continues and table multiplier increases by 1 (max 4x).</li>
+                <li>Multiplier starts at 1x every round.</li>
+                <li>Only the player who ends the round by passing scores that round.</li>
+                <li>If deck/hands run out before pass, the <strong>last Koi-Koi caller</strong> scores at current multiplier.</li>
+                <li>Point add-ons to an existing yaku do <strong>not</strong> create a new pass/Koi-Koi decision.</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Round-to-Round Start Rules</summary>
+              <ul>
+                <li>If winner scored at <strong>3x or 4x</strong>, winner starts next round.</li>
+                <li>If winner scored at <strong>1x or 2x</strong>, loser starts next round.</li>
+                <li>If a round has no scoring yaku, do not replay it; carry starter logic from the most recent scored round.</li>
+                <li><strong>1x carryover bonus (next round only):</strong> after a 1x win, the loser starts and may pass first yaku at 2x, or call Koi-Koi to jump to 3x.</li>
+                <li>If the previous 1x winner gets first yaku instead, they use normal options (pass at 1x or Koi-Koi to 2x).</li>
+                <li><strong>Round 12 leader rule:</strong> if the leading player forms first yaku at 1x, they must Koi-Koi (except when special 2x pass privilege applies).</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Scoring (Yaku List)</summary>
+              <ul>
+                <li>Five Brights: 10</li>
+                <li>Four Brights: 8 (or 7 with rain bright)</li>
+                <li>Three Brights (no rain bright): 5</li>
+                <li>Blossom Viewing (Cherry Bright + Sake Cup): 5</li>
+                <li>Moon Viewing (Moon Bright + Sake Cup): 5</li>
+                <li>Animal Trio set: 5</li>
+                <li>Red Scroll set: 5</li>
+                <li>Blue Scroll set: 5</li>
+                <li>Red and Blue Scroll sets together: 10</li>
+                <li>Seeds: 5 seeds = 3, then +1 per extra seed</li>
+                <li>Scrolls: 5 scrolls = 1, then +1 per extra scroll</li>
+                <li>Plains: 10 plains = 1, then +1 per extra plain</li>
+                <li>Sake Cup counts as seed only (not plain).</li>
+                <li>Round Month Sweep (all 4 cards of current round month): 5</li>
+              </ul>
+            </details>
+
+            <details class="rules-section">
+              <summary>Quick Start</summary>
+              <ul>
+                <li>Match by month.</li>
+                <li>Resolve hand play, then resolve deck pull.</li>
+                <li>Build yaku in your captured cards.</li>
+                <li>On a new yaku, decide Pass (bank now) or Koi-Koi (raise stakes).</li>
+                <li>Highest total after 12 rounds wins.</li>
+              </ul>
+            </details>
+          </article>
+        </div>
+      </section>
     </main>
 
     <script src="game.js"></script>
