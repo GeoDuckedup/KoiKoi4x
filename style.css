@@ -10,6 +10,8 @@
   --card-h: 89px;
   --mini-w: 36px;
   --mini-h: 45px;
+  --cpu-card-w: 44px;
+  --cpu-card-h: 55px;
   --turn-rail-a: rgba(255, 194, 92, 0.36);
   --turn-rail-b: rgba(255, 160, 43, 0.2);
   --hand-ready-ring: rgba(245, 166, 35, 1);
@@ -248,6 +250,14 @@ button.ghost {
   scrollbar-width: thin;
 }
 
+.cpu-hand-strip .card,
+.cpu-hand-strip .card-back {
+  width: var(--cpu-card-w);
+  height: var(--cpu-card-h);
+  border-radius: 5px;
+  border-width: 1px;
+}
+
 @media (max-width: 699px) {
   .cpu-hand-strip {
     gap: 4px;
@@ -401,6 +411,25 @@ button.ghost {
   box-shadow: 0 0 0 3px #ffb327, 0 0 0 6px rgba(255, 179, 39, 0.34), 0 0 12px rgba(166, 83, 24, 0.45);
   animation: choicePulse 0.95s ease-in-out infinite;
   transform: translateY(-1px);
+}
+
+.card.preview-landing {
+  opacity: 0.88;
+}
+
+.card.preview-landing::after {
+  content: "PLACE";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  background: rgba(133, 75, 10, 0.92);
+  color: #fff;
+  font-size: 8px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 8px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
 }
 
 .card.choice-muted {
@@ -966,5 +995,7 @@ button.ghost {
     --card-h: 104px;
     --mini-w: 42px;
     --mini-h: 52px;
+    --cpu-card-w: 50px;
+    --cpu-card-h: 62px;
   }
 }

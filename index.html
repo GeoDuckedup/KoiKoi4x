@@ -8,14 +8,6 @@
   </head>
   <body>
     <main class="app">
-      <section class="opponent-zone">
-        <div class="zone-header">
-          <span class="zone-title-with-score">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
-          <span id="cpu-hand-count">8 cards</span>
-        </div>
-        <div id="cpu-hand" class="cpu-hand-strip"></div>
-      </section>
-
       <section class="captured-zone">
         <div class="captured-col">
           <div class="zone-header compact">
@@ -56,6 +48,14 @@
             <div id="draw-preview-text" class="draw-preview-text">Waiting for draw.</div>
           </aside>
         </div>
+      </section>
+
+      <section class="opponent-zone">
+        <div class="zone-header">
+          <span class="zone-title-with-score">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
+          <span id="cpu-hand-count">8 cards</span>
+        </div>
+        <div id="cpu-hand" class="cpu-hand-strip"></div>
       </section>
 
       <section id="player-zone" class="player-zone">

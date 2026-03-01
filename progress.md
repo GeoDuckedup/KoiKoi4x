@@ -78,3 +78,135 @@ Original prompt: Get rid of need for manuals folder. Go through the code and mak
 - Added `cpu_phase1_preview` to `render_game_to_text` payload for test/debug visibility.
 - Validation: static server checks for index/js/css returned HTTP 200; Playwright smoke could not run here because `npx` is unavailable.
 - Fixed CPU profile default layout artifact by forcing hidden phase1 preview canvas to fully collapse (`display: none !important` when `[hidden]`).
+- Moved score/meta row (`CPU | Game x/12 Starts/Turn | You`) below context action bar.
+- Relocated `Table Xx | Last Koi-Koi` indicator into field section on a centered status row.
+- Added multiplier intensity visuals for table indicator via classes `mult-1..mult-4`:
+  - 1x neutral
+  - 2x warmer with light pulse/glow
+  - 3x stronger orange-red pulse/glow
+  - 4x red with strongest pulse/glow
+- `renderTop()` now updates multiplier class each frame based on `state.tableMultiplier`.
+- Updated hand instruction note behavior: now shows "Pick a card from your hand to play." when it's the human's actionable hand-selection state.
+- Note priority now is: field choice > deck reveal > hand pick > hidden.
+- Made hand instruction bar persistent to prevent layout shifting (always rendered with fixed min-height).
+- Added note state styling classes: active (blue) vs muted (dim).
+- Updated note logic to include simple CPU state text: "CPU playing.".
+- Idle state now shows blank text in the same persistent bar.
+- Extended persistent instruction bar to guide decision and progression states.
+- Added human decision prompt with multiplier hint: "Choose Pass, or Koi-Koi for +Xx (to Yx)."
+- Added forced-koi message when pass is disabled.
+- Added round-end prompt: winner/no-scorer summary + "Click Next Game."
+- Added match-end prompt: final score summary + "Click New Match."
+- Replaced one-off field choice auto-scroll with centralized action-target snapping.
+- Added `focusActiveActionTarget()` with priority-based targets:
+  - field choice -> field
+  - draw reveal -> recent deck pull
+  - pass/koi or next/new buttons -> context bar
+  - actionable hand pick -> player hand zone
+  - CPU active turn -> field (or recent deck pull during draw reveal)
+- Added dedupe guard (`autoFocusTargetKey`) so repeated renders don't keep re-snapping the same target.
+- Replaced center-based auto snap with smart minimal-scroll behavior.
+- New helper `scrollTargetIntoViewSmart()` scrolls only enough to keep target visible, with bottom-edge bias.
+- Action targets now avoid center overshoot and appear near the bottom of viewport when scrolled into view.
+- Removed field helper chip from field header to avoid overlapping/unreadable popups near multiplier status.
+- Deleted `#field-helper` element from HTML, removed helper styles, and removed helper update logic in `renderChoiceMode()`.
+- Guidance is now exclusively through the persistent instruction bar above the player hand.
+- Removed CPU profile risk-style subtitle (High Risk / Balanced / Low Risk) from UI.
+- CPU profile now shows only avatar and CPU name label.
+- Mobile-only CPU hand layout updated to 4 columns x 2 rows (`max-width: 699px`), while desktop remains 8 columns x 1 row.
+- Added explicit round-start snap to top in `startRound()`.
+- Reset `autoFocusTargetKey` at round start so action-target snapping resumes cleanly after top reset.
+- Implemented phase 1 + 2 foundation for start/load flow and game codes.
+- Added startup menu gating:
+  - `init()` now shows start menu after assets preload instead of auto-starting a match.
+  - New menu actions wired: `New Game`, `Load From Code`.
+- Added in-game code panel wiring:
+  - `Code` header toggle opens/closes panel.
+  - `Refresh Code`, `Copy Code`, `Load Code`, `Close` are wired.
+- Added code engine in `game.js`:
+  - Versioned format `HKK1.<payload>.<checksum>`.
+  - UTF-8 base64url payload encoding/decoding.
+  - FNV-style checksum validation.
+  - Snapshot serialization of full round/match state (players, field, pile, pending states, multiplier, logs, etc.).
+  - Snapshot validation for shape/types/known card IDs.
+  - Hydration + runtime state ownership checks to prevent duplicate-card corruption.
+  - Resume logic after load for CPU pending decision/deck-flip flows.
+- Added styles for new UI elements in `style.css`:
+  - `.top-actions`, `.code-panel*`, `.start-menu*`, status states.
+- Smoke check run via local HTTP server (outside sandbox):
+  - `index.html`, `game.js`, `style.css` all served with HTTP 200.
+  - Confirmed HTML contains `#code-panel`, `#start-menu`, `#start-load-btn`.
+- Test limitation:
+  - Playwright scripted smoke test could not be run in this environment because `node`/`npx` are unavailable.
+- Removed CPU avatar/profile UI per mobile layout fix request.
+- CPU hand area now renders as a single 1x8 horizontal strip on all viewports (desktop unchanged behavior, mobile uses horizontal scroll instead of 2x4 wrap).
+- CPU phase-1 reveal moved to in-hand slot:
+  - during preview delay, the selected CPU hand card is shown face-up in its actual hand position;
+  - all other CPU hand cards remain face-down.
+- Deleted avatar/profile markup from `index.html` and removed related CSS/JS hooks.
+- Validation smoke check:
+  - `index.html` served 200, contains only `#cpu-hand` in CPU hand section.
+  - Confirmed avatar/profile selectors no longer exist in served HTML/CSS.
+- CPU hand readability tweak: phase-1 CPU reveal is now left-anchored.
+- During CPU preview, selected card is rendered in the leftmost CPU-hand slot; remaining cards are shown after it.
+- Visual effect: CPU hand now reads like a train queue (left shown card -> card leaves -> remaining hand shifts).
+- Gameplay logic unchanged; this is a display-only reorder in `renderHands()`.
+- Major HUD refactor applied:
+  - Removed old `CPU | Game x/12 | You` score/meta row.
+  - Added inline score badges to hand headers:
+    - `CPU Hand` now includes red/bold `#cpu-score-inline`.
+    - `Your Hand` now includes red/bold `#player-score-inline`.
+  - Added `turn-meta` line in field section: `Starts: ... | Turn: ...`.
+- Bottom title row button cluster updated:
+  - Added `Game 1 / 12` button to the right-side cluster, to the left of `Action Log`.
+  - Right-side order is now: `Game 1/12`, `Action Log`, `Code`, `Rules`.
+- Added match round summary system:
+  - New panel `#game-summary-panel` with 4 columns: `Month`, `You`, `CPU`, `Mult`.
+  - Populated from new state field `roundHistory` and rendered by `renderRoundSummary()`.
+  - Unplayed rounds show `-`; no-score rounds are marked via styling in `Mult` column.
+- Save system updated for new round summary data:
+  - Save code version bumped to `HKK2` (`SAVE_CODE_PREFIX = "HKK2"`, `SAVE_CODE_VERSION = 2`).
+  - Snapshot now includes required `roundHistory`.
+  - Validation/hydration now enforces roundHistory schema and restores it.
+  - This is intentionally not backward compatible with old `HKK1` codes.
+- Round history write paths:
+  - `endRoundWithWinner`: records month + winner points + multiplier.
+  - `endRoundDraw`: records month with 0/0 and current multiplier.
+- Structural cleanup:
+  - Rewrote `index.html` to a single valid document (previous duplicate full-document artifact removed).
+- Smoke check:
+  - Local server served updated HTML/CSS/JS (HTTP 200).
+  - Confirmed new markers for inline scores, game-summary button/panel, and `HKK2` save constants.
+- Moved `CPU Hand` section to sit directly above `Your Hand` (new order: captures -> field -> CPU hand -> player hand).
+- Added compact CPU-hand-only card sizing (about 60% of player hand size):
+  - mobile/default: `44x55`
+  - desktop: `50x62`
+- Kept `CPU Hand` and `Your Hand` header text/score styling unchanged and consistent.
+- No gameplay logic changes; display-only layout and sizing update.
+- Implemented reversible Phase-1 hand preview flow improvements:
+  - Hand preview pending states now fully support both `handMatch` and `handPlace` through save/load (`serialize`, `validate`, `hydrate`).
+  - `handPlace` pending ownership is now validated on hydrated states.
+- Added no-match placement preview in Field:
+  - While previewing a no-match hand card, a duplicate ghost card now appears in Field with the same glow language as choice targets.
+  - Preview card is visually marked as a placement preview (`PLACE`) and remains non-interactive.
+- Instruction bar now uses contextual pending prompts:
+  - Replaced generic "Finish field choice above." with `getChoicePromptText(pending)` so hand-preview states explicitly tell the player to confirm/cancel.
+- Focus behavior refined for preview type:
+  - `handPlace` preview now auto-focuses to player-hand zone instead of field zone; match previews still focus field.
+- Adjusted no-match placement interaction for consistency:
+  - `handPlace` now confirms by tapping the glowing preview card in the Field (not by tapping hand card again).
+  - Tapping the selected hand card again now cancels preview and returns to hand selection.
+  - `handPlace.options` now includes the pending hand card id so field-click routing can resolve the preview target.
+- Updated handPlace instruction copy:
+  - Prompt now says to tap preview field card to place, or selected hand card to cancel.
+- Auto-focus behavior updated:
+  - `handPlace` pending now focuses Field (confirm target) instead of player hand.
+- Visual affordance update:
+  - Preview placement card keeps glow and is now marked selectable for cursor/interaction consistency.
+- Smoke check:
+  - Local server served `index.html` and `game.js` with HTTP 200 on port 5185.
+- Hand-match preview cancel parity implemented:
+  - While `handMatch` preview is active, tapping the selected hand card again now cancels preview (same behavior as `handPlace`).
+  - Switching to a different hand card during preview still works as before.
+- Updated hand-match instruction copy to include explicit cancel guidance and 3-match sweep wording.
+- Smoke check: local server served `index.html` and `game.js` with HTTP 200 on port 5185.

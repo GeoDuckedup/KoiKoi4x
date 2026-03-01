@@ -767,9 +767,9 @@ function buildSnapshot() {
 
 function serializePendingSelection(pending) {
   if (!pending) return null;
-  if (pending.type === "handMatch") {
+  if (pending.type === "handMatch" || pending.type === "handPlace") {
     return {
-      type: "handMatch",
+      type: pending.type,
       playerIndex: pending.playerIndex,
       cardId: pending.cardId,
       options: [...pending.options],
@@ -893,7 +893,7 @@ function validatePendingSelectionSnapshot(pending) {
   if (!pending || typeof pending !== "object") {
     throw new Error("pendingSelection must be an object");
   }
-  if (pending.type === "handMatch") {
+  if (pending.type === "handMatch" || pending.type === "handPlace") {
     asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex");
     ensureCardId(pending.cardId, "pendingSelection.cardId");
     if (!Array.isArray(pending.options)) {
@@ -1012,9 +1012,9 @@ function applySnapshot(snapshot) {
 
 function hydratePendingSelection(pending) {
   if (!pending) return null;
-  if (pending.type === "handMatch") {
+  if (pending.type === "handMatch" || pending.type === "handPlace") {
     return {
-      type: "handMatch",
+      type: pending.type,
       playerIndex: asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex"),
       cardId: String(pending.cardId),
       options: pending.options.map(String),
@@ -1132,7 +1132,7 @@ function validateHydratedStateCardOwnership() {
         throw new Error("pendingSelection references a field card that is not on the field");
       }
     }
-    if (state.pendingSelection.type === "handMatch") {
+    if (state.pendingSelection.type === "handMatch" || state.pendingSelection.type === "handPlace") {
       const handSet = new Set(state.players[state.pendingSelection.playerIndex].hand.map((card) => card.id));
       if (!handSet.has(state.pendingSelection.cardId)) {
         throw new Error("pendingSelection hand card is missing");
@@ -1451,12 +1451,45 @@ function detectLuckyHand(hand) {
 function onPlayerHandClick(event) {
   if (!state.ready || state.roundOver || state.awaitingDecision || state.awaitingDeckFlip) return;
   if (state.currentPlayer !== 0) return;
-  if (state.pendingSelection) return;
+
+  const pending = state.pendingSelection;
+  const handPreviewPending =
+    Boolean(pending) &&
+    pending.playerIndex === 0 &&
+    (pending.type === "handMatch" || pending.type === "handPlace");
 
   const cardNode = event.target.closest("[data-card-id]");
-  if (!cardNode) return;
+  if (!cardNode) {
+    if (handPreviewPending) {
+      clearPlayerHandPreview();
+    }
+    return;
+  }
 
   const cardId = cardNode.dataset.cardId;
+  const player = state.players[0];
+  const card = player.hand.find((entry) => entry.id === cardId);
+  if (!card) return;
+
+  if (pending) {
+    if (pending.type === "drawMatch") return;
+    if (handPreviewPending) {
+      if (pending.cardId === cardId) {
+        if (pending.type === "handPlace" || pending.type === "handMatch") {
+          clearPlayerHandPreview();
+        }
+        return;
+      }
+      previewPlayerHandCard(cardId);
+      return;
+    }
+    return;
+  }
+
+  previewPlayerHandCard(cardId);
+}
+
+function previewPlayerHandCard(cardId) {
   const player = state.players[0];
   const card = player.hand.find((entry) => entry.id === cardId);
   if (!card) return;
@@ -1465,10 +1498,10 @@ function onPlayerHandClick(event) {
   if (matches.length > 0) {
     const prompt =
       matches.length === 1
-        ? `Tap the highlighted ${describeMonth(card.month)} field card to capture.`
+        ? `Tap highlighted ${describeMonth(card.month)} field card to capture, or tap hand area to cancel.`
         : matches.length === 3
-          ? `Tap any highlighted ${describeMonth(card.month)} field card to capture all four cards.`
-          : `Choose a ${describeMonth(card.month)} field card to pair.`;
+          ? `Tap highlighted ${describeMonth(card.month)} card to sweep all four, or tap hand area to cancel.`
+          : `Choose highlighted ${describeMonth(card.month)} field card, or tap hand area to cancel.`;
     beginPendingSelection(
       {
         type: "handMatch",
@@ -1476,12 +1509,32 @@ function onPlayerHandClick(event) {
         cardId,
         options: matches.map((entry) => entry.id),
       },
-      prompt
+      prompt,
+      { silent: true }
     );
     return;
   }
 
-  executePlayFromHand(0, cardId, null);
+  beginPendingSelection(
+    {
+      type: "handPlace",
+      playerIndex: 0,
+      cardId,
+      options: [cardId],
+    },
+    `No match for ${card.name}. Tap preview field card to place, or tap selected hand card to cancel.`,
+    { silent: true }
+  );
+}
+
+function clearPlayerHandPreview() {
+  const pending = state.pendingSelection;
+  if (!pending) return;
+  if (pending.playerIndex !== 0) return;
+  if (pending.type !== "handMatch" && pending.type !== "handPlace") return;
+  state.pendingSelection = null;
+  state.message = `${state.players[state.currentPlayer].name} to play. Table ${state.tableMultiplier}x.`;
+  renderAll();
 }
 
 function onFieldClick(event) {
@@ -1493,7 +1546,11 @@ function onFieldClick(event) {
   const pending = state.pendingSelection;
   if (!pending || !pending.options.includes(selectedId)) return;
 
-  if (pending.type === "handMatch") {
+  if (pending.type === "handPlace") {
+    if (selectedId === pending.cardId) {
+      executePlayFromHand(pending.playerIndex, pending.cardId, null);
+    }
+  } else if (pending.type === "handMatch") {
     executePlayFromHand(pending.playerIndex, pending.cardId, selectedId);
   } else if (pending.type === "drawMatch") {
     resolveDrawMatch(pending.playerIndex, pending.drawnCard, selectedId, pending.moveNumber);
@@ -1524,10 +1581,12 @@ function onDrawPreviewClick() {
   }, PLAYER_DRAW_REVEAL_LINGER_MS);
 }
 
-function beginPendingSelection(pending, logMessage) {
+function beginPendingSelection(pending, logMessage, options = {}) {
   state.pendingSelection = pending;
   state.message = logMessage;
-  addSystemLog(state.message);
+  if (!options.silent) {
+    addSystemLog(state.message);
+  }
   renderAll();
 }
 
@@ -2868,16 +2927,21 @@ function renderHands() {
 
   const pending = state.pendingSelection;
   const inChoiceMode = Boolean(pending && pending.playerIndex === 0);
+  const handPreviewPending =
+    Boolean(pending) &&
+    pending.playerIndex === 0 &&
+    (pending.type === "handMatch" || pending.type === "handPlace");
   const waitingDeckFlip =
     Boolean(state.awaitingDeckFlip) &&
     state.awaitingDeckFlip.playerIndex === 0 &&
     !state.awaitingDeckFlip.revealed;
-  const inputLocked = inChoiceMode || waitingDeckFlip;
+  const inputLocked = waitingDeckFlip || (inChoiceMode && !handPreviewPending);
   const selectable =
     state.currentPlayer === 0 &&
     !state.roundOver &&
     !state.awaitingDecision &&
-    !inputLocked;
+    !waitingDeckFlip &&
+    (!state.pendingSelection || handPreviewPending);
   if (ui.playerZone) {
     ui.playerZone.classList.toggle("turn-ready", selectable);
   }
@@ -2885,7 +2949,10 @@ function renderHands() {
 
   ui.playerHand.innerHTML = state.players[0].hand
     .map((card) => {
-      const isPending = pending && pending.type === "handMatch" && pending.cardId === card.id;
+      const isPending =
+        pending &&
+        (pending.type === "handMatch" || pending.type === "handPlace") &&
+        pending.cardId === card.id;
       const classes = ["card", "badged"];
       if (selectable) classes.push("selectable");
       if (isPending) classes.push("pending", "choice-source");
@@ -2904,19 +2971,29 @@ function renderField() {
   const activeOptions = pending ? pending.options : aiPreview ? aiPreview.options : null;
   const inChoiceMode = Boolean(activeOptions && activeOptions.length);
   const humanSelectable = Boolean(pending);
-  ui.field.innerHTML = state.field
-    .map((card) => {
-      const highlighted = inChoiceMode && activeOptions.includes(card.id);
+  const previewPlacementCard =
+    pending && pending.type === "handPlace"
+      ? state.players[0].hand.find((entry) => entry.id === pending.cardId) || CARD_BY_ID.get(pending.cardId) || null
+      : null;
+  const fieldEntries = state.field.map((card) => ({ card, isPreviewPlacement: false }));
+  if (previewPlacementCard) {
+    fieldEntries.push({ card: previewPlacementCard, isPreviewPlacement: true });
+  }
+  ui.field.innerHTML = fieldEntries
+    .map(({ card, isPreviewPlacement }) => {
+      const highlighted = !isPreviewPlacement && inChoiceMode && activeOptions.includes(card.id);
       const classes = ["card", "badged"];
-      if (highlighted) {
-      if (humanSelectable) {
+      if (isPreviewPlacement) {
+        classes.push("preview-landing", "choice-target", "selectable");
+      } else if (highlighted) {
+        if (humanSelectable) {
           classes.push("selectable");
         }
         classes.push("choice-target");
       } else if (inChoiceMode) {
         classes.push("choice-muted");
       }
-      const disabled = humanSelectable && highlighted ? "" : " disabled";
+      const disabled = isPreviewPlacement ? "" : humanSelectable && highlighted ? "" : " disabled";
       return `<button type="button" class="${classes.join(" ")}" data-card-id="${card.id}" data-card-type="${card.type}"${disabled}>${renderBadgedCardContent(card)}</button>`;
     })
     .join("");
@@ -3025,9 +3102,19 @@ function getChoicePromptText(pending) {
   if (!pending) return "";
   if (pending.type === "handMatch") {
     const card = CARD_BY_ID.get(pending.cardId);
+    if (!card) {
+      return "Tap highlighted field card to capture, or tap selected hand card to cancel.";
+    }
+    if (pending.options.length === 3) {
+      return `Tap highlighted ${describeMonth(card.month)} field card to sweep all four, or tap selected hand card to cancel.`;
+    }
+    return `Tap highlighted field card to pair with ${card.name}, or tap selected hand card to cancel.`;
+  }
+  if (pending.type === "handPlace") {
+    const card = CARD_BY_ID.get(pending.cardId);
     return card
-      ? `Select 1 highlighted field card to pair with ${card.name}.`
-      : "Select 1 highlighted field card to pair with your selected hand card.";
+      ? `No match for ${card.name}. Tap preview field card to place, or tap selected hand card to cancel.`
+      : "No match. Tap preview field card to place, or tap selected hand card to cancel.";
   }
   if (pending.type === "drawMatch") {
     return `Select 1 highlighted field card to pair with drawn ${pending.drawnCard.name}.`;
@@ -3064,7 +3151,7 @@ function renderChoiceMode() {
     let noteText = "";
     let activeNote = false;
     if (pending) {
-      noteText = "Finish field choice above.";
+      noteText = getChoicePromptText(pending);
       activeNote = true;
     } else if (waitingDeckFlip) {
       noteText = "Reveal the deck card above.";
