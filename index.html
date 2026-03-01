@@ -8,22 +8,6 @@
   </head>
   <body>
     <main class="app">
-      <section class="score-panel">
-        <div class="score-box">
-          <span>CPU</span>
-          <strong id="cpu-score">0</strong>
-        </div>
-        <div class="meta-box">
-          <div id="game-counter">Game 1 / 12</div>
-          <div id="dealer-label">Dealer: You</div>
-          <div id="turn-label">Turn: You</div>
-        </div>
-        <div class="score-box">
-          <span>You</span>
-          <strong id="player-score">0</strong>
-        </div>
-      </section>
-
       <section class="opponent-zone">
         <div class="zone-header">
           <span>CPU Hand</span>
@@ -35,7 +19,6 @@
             <img id="cpu-avatar" alt="CPU profile avatar" />
             <canvas id="cpu-phase1-preview-canvas" class="cpu-phase1-preview-canvas" width="138" height="170" hidden></canvas>
             <div id="cpu-profile-name" class="cpu-profile-name">The Monk</div>
-            <div id="cpu-profile-style" class="cpu-profile-style">Balanced</div>
           </aside>
         </div>
       </section>
@@ -44,9 +27,11 @@
         <div class="zone-header">
           <span>Field</span>
           <span class="field-meta">
-            <span id="field-helper" class="field-helper" hidden>Choose 1</span>
             <span id="deck-count">Deck: 24</span>
           </span>
+        </div>
+        <div class="field-koi-row">
+          <span id="koi-state" class="koi-state mult-1">Table 1x | Last Koi-Koi: none</span>
         </div>
         <div class="field-layout">
           <div id="field" class="field-grid"></div>
@@ -82,9 +67,8 @@
       <section id="player-zone" class="player-zone">
         <div class="zone-header">
           <span>Your Hand</span>
-          <span id="koi-state">Koi-Koi: not called</span>
         </div>
-        <div id="hand-lock-note" class="hand-lock-note" hidden>Finish field choice above.</div>
+        <div id="hand-lock-note" class="hand-lock-note is-muted"></div>
         <div id="player-hand" class="hand player"></div>
       </section>
 
@@ -95,6 +79,22 @@
         <button id="context-right-btn" type="button" class="context-btn" data-action="koi" disabled>
           Koi-Koi
         </button>
+      </section>
+
+      <section class="score-panel">
+        <div class="score-box">
+          <span>CPU</span>
+          <strong id="cpu-score">0</strong>
+        </div>
+        <div class="meta-box">
+          <div id="game-counter">Game 1 / 12</div>
+          <div id="dealer-label">Dealer: You</div>
+          <div id="turn-label">Turn: You</div>
+        </div>
+        <div class="score-box">
+          <span>You</span>
+          <strong id="player-score">0</strong>
+        </div>
       </section>
 
       <section class="message-zone">

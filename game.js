@@ -392,6 +392,7 @@ const state = {
   aiTimer: null,
   aiTask: null,
   drawRevealTimer: null,
+  autoFocusTargetKey: null,
 };
 
 const ui = {};
@@ -460,14 +461,12 @@ function cacheUI() {
   ui.cpuAvatar = document.getElementById("cpu-avatar");
   ui.cpuPhase1PreviewCanvas = document.getElementById("cpu-phase1-preview-canvas");
   ui.cpuProfileName = document.getElementById("cpu-profile-name");
-  ui.cpuProfileStyle = document.getElementById("cpu-profile-style");
   ui.drawPreviewCanvas = document.getElementById("draw-preview-canvas");
   ui.drawPreviewText = document.getElementById("draw-preview-text");
   ui.drawPreview = document.getElementById("draw-preview");
   ui.playerZone = document.getElementById("player-zone");
   ui.fieldZone = document.getElementById("field-zone");
   ui.handLockNote = document.getElementById("hand-lock-note");
-  ui.fieldHelper = document.getElementById("field-helper");
   ui.cpuCaptured = document.getElementById("cpu-captured");
   ui.playerCaptured = document.getElementById("player-captured");
   ui.contextZone = document.getElementById("context-zone");
@@ -564,6 +563,7 @@ function pickRandomAIProfile() {
 }
 
 function startRound() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
   clearAITask();
   clearDrawRevealTask();
   resetDrawPreviewFx();
@@ -584,6 +584,8 @@ function startRound() {
     cardId: null,
     text: "Waiting for draw.",
   };
+  state.autoFocusTargetKey = null;
+  state.autoFocusTargetKey = null;
 
   const p0 = state.players[0].score;
   const p1 = state.players[1].score;
@@ -756,23 +758,6 @@ function beginPendingSelection(pending, logMessage) {
   state.message = logMessage;
   addSystemLog(state.message);
   renderAll();
-  focusPendingFieldChoice();
-}
-
-function focusPendingFieldChoice() {
-  const pending = state.pendingSelection;
-  if (!pending || pending.playerIndex !== 0) return;
-  const firstOption = pending.options?.[0];
-  if (!firstOption) return;
-
-  requestAnimationFrame(() => {
-    const target = ui.field?.querySelector(`[data-card-id="${firstOption}"]`);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-    if (typeof target.focus === "function") {
-      target.focus({ preventScroll: true });
-    }
-  });
 }
 
 function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
@@ -1889,6 +1874,93 @@ function renderAll() {
   renderCaptured();
   renderContextBar();
   paintAllCards();
+  focusActiveActionTarget();
+}
+
+function getActiveActionFocusKey() {
+  const pending = state.pendingSelection && state.pendingSelection.playerIndex === 0 ? state.pendingSelection : null;
+  if (pending) return "field-zone";
+
+  const awaitingFlip = state.awaitingDeckFlip;
+  if (awaitingFlip) return "draw-preview";
+
+  if (state.awaitingDecision && state.awaitingDecision.kind === "stopOrKoi" && state.awaitingDecision.playerIndex === 0) {
+    return "context-zone";
+  }
+
+  if (state.roundOver || state.matchOver) {
+    return "context-zone";
+  }
+
+  const canPickHandCard =
+    state.currentPlayer === 0 &&
+    !state.roundOver &&
+    !state.awaitingDecision &&
+    !state.pendingSelection &&
+    !state.awaitingDeckFlip &&
+    state.players[0].hand.length > 0;
+  if (canPickHandCard) return "player-zone";
+
+  const cpuPlaying =
+    state.currentPlayer === 1 &&
+    !state.roundOver &&
+    !state.awaitingDecision;
+  if (cpuPlaying) {
+    if (state.awaitingDeckFlip) return "draw-preview";
+    return "field-zone";
+  }
+
+  return null;
+}
+
+function focusActiveActionTarget() {
+  const key = getActiveActionFocusKey();
+  if (!key) {
+    state.autoFocusTargetKey = null;
+    return;
+  }
+  if (state.autoFocusTargetKey === key) return;
+  state.autoFocusTargetKey = key;
+
+  requestAnimationFrame(() => {
+    let target = null;
+    if (key === "field-zone") target = ui.fieldZone;
+    if (key === "draw-preview") target = ui.drawPreview;
+    if (key === "context-zone") target = ui.contextZone;
+    if (key === "player-zone") target = ui.playerZone;
+    if (!target) return;
+    scrollTargetIntoViewSmart(target);
+    if (typeof target.focus === "function") {
+      target.focus({ preventScroll: true });
+    }
+  });
+}
+
+function scrollTargetIntoViewSmart(target) {
+  if (!target || typeof target.getBoundingClientRect !== "function") return;
+  const rect = target.getBoundingClientRect();
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+  if (!viewportHeight) return;
+
+  // Keep actionable targets visible with minimal movement, biased toward the bottom edge.
+  const topBuffer = 10;
+  const bottomBuffer = 14;
+  const maxBottom = viewportHeight - bottomBuffer;
+  const minTop = topBuffer;
+
+  let deltaY = 0;
+  if (rect.bottom > maxBottom) {
+    deltaY = rect.bottom - maxBottom;
+  } else if (rect.top < minTop) {
+    deltaY = rect.top - minTop;
+  } else {
+    return;
+  }
+
+  window.scrollBy({
+    top: deltaY,
+    behavior: "smooth",
+  });
 }
 
 function renderTop() {
@@ -1912,6 +1984,9 @@ function renderTop() {
 
   const callerLabel = state.lastKoiCaller === null ? "none" : state.players[state.lastKoiCaller].name;
   ui.koiState.textContent = `Table ${state.tableMultiplier}x | Last Koi-Koi: ${callerLabel}`;
+  const clampedMult = Math.max(1, Math.min(4, state.tableMultiplier));
+  ui.koiState.classList.remove("mult-1", "mult-2", "mult-3", "mult-4");
+  ui.koiState.classList.add(`mult-${clampedMult}`);
 }
 
 function renderActionLog() {
@@ -2043,9 +2118,6 @@ function renderCpuProfile() {
   if (ui.cpuProfileName) {
     ui.cpuProfileName.textContent = previewCard ? "CPU Selected" : profile.name;
   }
-  if (ui.cpuProfileStyle) {
-    ui.cpuProfileStyle.textContent = previewCard ? previewCard.name : profile.style;
-  }
 }
 
 function renderDrawPreview() {
@@ -2168,26 +2240,76 @@ function renderChoiceMode() {
     Boolean(state.awaitingDeckFlip) &&
     state.awaitingDeckFlip.playerIndex === 0 &&
     !state.awaitingDeckFlip.revealed;
+  const canPickHandCard =
+    state.currentPlayer === 0 &&
+    !state.roundOver &&
+    !state.awaitingDecision &&
+    !state.pendingSelection &&
+    !state.awaitingDeckFlip &&
+    state.players[0].hand.length > 0;
+  const humanDecision =
+    Boolean(state.awaitingDecision) &&
+    state.awaitingDecision.kind === "stopOrKoi" &&
+    state.awaitingDecision.playerIndex === 0;
+  const roundEndedWaitingNext = state.roundOver && !state.matchOver;
+  const matchEndedWaitingNew = state.matchOver;
+  const cpuPlaying =
+    state.currentPlayer === 1 &&
+    !state.roundOver &&
+    !state.awaitingDecision;
   const active = Boolean(pending || aiPreview);
-
-  if (ui.fieldHelper) {
-    ui.fieldHelper.hidden = !active;
-    ui.fieldHelper.textContent = pending
-      ? `Choose 1 of ${pending.options.length}`
-      : aiPreview
-        ? aiPreview.prompt
-        : "";
-  }
   if (ui.handLockNote) {
+    let noteText = "";
+    let activeNote = false;
     if (pending) {
-      ui.handLockNote.hidden = false;
-      ui.handLockNote.textContent = "Finish field choice above.";
+      noteText = "Finish field choice above.";
+      activeNote = true;
     } else if (waitingDeckFlip) {
-      ui.handLockNote.hidden = false;
-      ui.handLockNote.textContent = "Reveal the deck card above.";
+      noteText = "Reveal the deck card above.";
+      activeNote = true;
+    } else if (humanDecision) {
+      const decision = state.awaitingDecision;
+      const increase = Math.max(0, decision.koiMultiplier - state.tableMultiplier);
+      if (decision.canPass) {
+        noteText = `Choose Pass, or Koi-Koi for +${increase}x (to ${decision.koiMultiplier}x).`;
+      } else {
+        noteText = `Pass disabled. Choose Koi-Koi for +${increase}x (to ${decision.koiMultiplier}x).`;
+      }
+      activeNote = true;
+    } else if (roundEndedWaitingNext) {
+      let winnerText = "Round over.";
+      const scoredMatch = state.message.match(/^(You|CPU) scores .* = (\d+)/);
+      if (scoredMatch) {
+        winnerText = `${scoredMatch[1]} win ${scoredMatch[2]}.`;
+      } else if (state.message.includes("No scorer this round")) {
+        winnerText = "No scorer this round.";
+      }
+      noteText = `${winnerText} Click Next Game.`;
+      activeNote = true;
+    } else if (matchEndedWaitingNew) {
+      const p0 = state.players[0].score;
+      const p1 = state.players[1].score;
+      if (p0 > p1) {
+        noteText = `You win ${p0}-${p1}. Click New Match.`;
+      } else if (p1 > p0) {
+        noteText = `CPU wins ${p1}-${p0}. Click New Match.`;
+      } else {
+        noteText = `Draw ${p0}-${p1}. Click New Match.`;
+      }
+      activeNote = true;
+    } else if (canPickHandCard) {
+      noteText = "Pick a card from your hand to play.";
+      activeNote = true;
+    } else if (cpuPlaying) {
+      noteText = "CPU playing.";
+      activeNote = false;
     } else {
-      ui.handLockNote.hidden = true;
+      noteText = "";
+      activeNote = false;
     }
+    ui.handLockNote.textContent = noteText;
+    ui.handLockNote.classList.toggle("is-active", activeNote);
+    ui.handLockNote.classList.toggle("is-muted", !activeNote);
   }
   if (ui.fieldZone) {
     ui.fieldZone.classList.toggle("choice-mode", active);
