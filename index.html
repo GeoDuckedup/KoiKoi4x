@@ -23,6 +23,25 @@
         </div>
       </section>
 
+      <section class="captured-zone">
+        <div class="captured-col">
+          <div class="zone-header compact">
+            <span>CPU Captures</span>
+            <span id="cpu-captured-count">0</span>
+          </div>
+          <div id="cpu-captured" class="captured-grid"></div>
+          <div id="cpu-yaku" class="yaku-line">No set</div>
+        </div>
+        <div class="captured-col">
+          <div class="zone-header compact">
+            <span>Your Captures</span>
+            <span id="player-captured-count">0</span>
+          </div>
+          <div id="player-captured" class="captured-grid"></div>
+          <div id="player-yaku" class="yaku-line">No set</div>
+        </div>
+      </section>
+
       <section id="field-zone" class="field-zone">
         <div class="zone-header">
           <span>Field</span>
@@ -42,25 +61,6 @@
             </div>
             <div id="draw-preview-text" class="draw-preview-text">Waiting for draw.</div>
           </aside>
-        </div>
-      </section>
-
-      <section class="captured-zone">
-        <div class="captured-col">
-          <div class="zone-header compact">
-            <span>CPU Captures</span>
-            <span id="cpu-captured-count">0</span>
-          </div>
-          <div id="cpu-captured" class="captured-grid"></div>
-          <div id="cpu-yaku" class="yaku-line">No set</div>
-        </div>
-        <div class="captured-col">
-          <div class="zone-header compact">
-            <span>Your Captures</span>
-            <span id="player-captured-count">0</span>
-          </div>
-          <div id="player-captured" class="captured-grid"></div>
-          <div id="player-yaku" class="yaku-line">No set</div>
         </div>
       </section>
 
@@ -111,8 +111,28 @@
         <div>
           <h1>Hanafuda Koi-Koi</h1>
         </div>
-        <button id="rules-toggle" class="ghost" type="button">Rules</button>
+        <div class="top-actions">
+          <button id="code-toggle" class="ghost" type="button">Code</button>
+          <button id="rules-toggle" class="ghost" type="button">Rules</button>
+        </div>
       </header>
+
+      <section id="code-panel" class="code-panel" hidden>
+        <div class="code-panel-head">Save / Load Code</div>
+        <label class="code-label" for="export-code">Your current game code</label>
+        <textarea id="export-code" class="code-text" readonly></textarea>
+        <div class="code-actions">
+          <button id="refresh-code-btn" type="button">Refresh Code</button>
+          <button id="copy-code-btn" type="button">Copy Code</button>
+        </div>
+        <label class="code-label" for="import-code">Load from code</label>
+        <textarea id="import-code" class="code-text" placeholder="Paste a code here"></textarea>
+        <div class="code-actions">
+          <button id="load-code-btn" type="button">Load Code</button>
+          <button id="close-code-btn" type="button" class="ghost">Close</button>
+        </div>
+        <div id="code-status" class="code-status"></div>
+      </section>
 
       <section id="rules-panel" class="rules-panel" hidden>
         <div class="rules-pages">
@@ -226,6 +246,22 @@
         </div>
       </section>
     </main>
+
+    <section id="start-menu" class="start-menu">
+      <div class="start-card">
+        <h2>Hanafuda Koi-Koi</h2>
+        <p>Start a new match or load from a code.</p>
+        <div class="start-actions">
+          <button id="start-new-btn" type="button" class="primary">New Game</button>
+        </div>
+        <label class="code-label" for="start-import-code">Enter Code</label>
+        <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share code here"></textarea>
+        <div class="start-actions">
+          <button id="start-load-btn" type="button">Load From Code</button>
+        </div>
+        <div id="start-menu-status" class="code-status"></div>
+      </div>
+    </section>
 
     <script src="game.js"></script>
   </body>

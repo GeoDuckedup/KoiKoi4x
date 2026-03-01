@@ -350,6 +350,8 @@ const AI_STEP_CPU_PHASE1_PREVIEW_MS = 520;
 const AI_STEP_TARGET_MS = 340;
 const AI_STEP_DRAW_RESOLVE_MS = 360;
 const AI_STEP_DECISION_MS = 420;
+const SAVE_CODE_PREFIX = "HKK1";
+const SAVE_CODE_VERSION = 1;
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -429,11 +431,12 @@ function init() {
   preloadSheets()
     .then(() => {
       state.ready = true;
-      startNewMatch();
+      showStartMenu();
     })
     .catch((err) => {
       addSystemLog(`Could not load card images: ${err.message}`);
       renderActionLog();
+      setCodeStatus(`Asset load failed: ${err.message}`, true, "start");
     });
 
   window.render_game_to_text = renderGameToText;
@@ -472,6 +475,20 @@ function cacheUI() {
   ui.contextZone = document.getElementById("context-zone");
   ui.contextLeftBtn = document.getElementById("context-left-btn");
   ui.contextRightBtn = document.getElementById("context-right-btn");
+  ui.codeToggle = document.getElementById("code-toggle");
+  ui.codePanel = document.getElementById("code-panel");
+  ui.exportCode = document.getElementById("export-code");
+  ui.importCode = document.getElementById("import-code");
+  ui.codeStatus = document.getElementById("code-status");
+  ui.refreshCodeBtn = document.getElementById("refresh-code-btn");
+  ui.copyCodeBtn = document.getElementById("copy-code-btn");
+  ui.loadCodeBtn = document.getElementById("load-code-btn");
+  ui.closeCodeBtn = document.getElementById("close-code-btn");
+  ui.startMenu = document.getElementById("start-menu");
+  ui.startNewBtn = document.getElementById("start-new-btn");
+  ui.startLoadBtn = document.getElementById("start-load-btn");
+  ui.startImportCode = document.getElementById("start-import-code");
+  ui.startMenuStatus = document.getElementById("start-menu-status");
   ui.rulesToggle = document.getElementById("rules-toggle");
   ui.rulesPanel = document.getElementById("rules-panel");
 }
@@ -481,6 +498,13 @@ function bindUI() {
   ui.field.addEventListener("click", onFieldClick);
   ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
+  ui.codeToggle?.addEventListener("click", onToggleCodePanel);
+  ui.refreshCodeBtn?.addEventListener("click", onRefreshCode);
+  ui.copyCodeBtn?.addEventListener("click", onCopyCode);
+  ui.loadCodeBtn?.addEventListener("click", onLoadCodeFromPanel);
+  ui.closeCodeBtn?.addEventListener("click", () => setCodePanelOpen(false));
+  ui.startNewBtn?.addEventListener("click", onStartNewFromMenu);
+  ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.rulesToggle.addEventListener("click", () => {
     ui.rulesPanel.hidden = !ui.rulesPanel.hidden;
     ui.rulesToggle.textContent = ui.rulesPanel.hidden ? "Rules" : "Hide Rules";
@@ -503,6 +527,126 @@ function preloadSheets() {
   return Promise.all(tasks);
 }
 
+function showStartMenu() {
+  if (ui.startMenu) {
+    ui.startMenu.hidden = false;
+  }
+  setCodePanelOpen(false);
+  setCodeStatus("", false, "start");
+}
+
+function hideStartMenu() {
+  if (ui.startMenu) {
+    ui.startMenu.hidden = true;
+  }
+  setCodeStatus("", false, "start");
+}
+
+function setCodePanelOpen(open) {
+  if (!ui.codePanel || !ui.codeToggle) return;
+  ui.codePanel.hidden = !open;
+  ui.codeToggle.textContent = open ? "Hide Code" : "Code";
+}
+
+function onToggleCodePanel() {
+  const nextOpen = ui.codePanel?.hidden !== false;
+  setCodePanelOpen(nextOpen);
+  if (nextOpen) {
+    refreshExportCode();
+    setCodeStatus("", false, "panel");
+  }
+}
+
+function onRefreshCode() {
+  if (!state.ready || !state.players.length) return;
+  refreshExportCode();
+  setCodeStatus("Code refreshed.", false, "panel");
+}
+
+function refreshExportCode() {
+  if (!ui.exportCode || !state.players.length) return;
+  try {
+    const code = encodeStateToCode();
+    ui.exportCode.value = code;
+  } catch (err) {
+    setCodeStatus(`Could not generate code: ${err.message}`, true, "panel");
+  }
+}
+
+async function onCopyCode() {
+  if (!ui.exportCode) return;
+  if (!ui.exportCode.value.trim()) {
+    refreshExportCode();
+  }
+  const value = ui.exportCode.value.trim();
+  if (!value) {
+    setCodeStatus("No code available to copy.", true, "panel");
+    return;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      ui.exportCode.focus();
+      ui.exportCode.select();
+      document.execCommand("copy");
+      ui.exportCode.setSelectionRange(0, 0);
+    }
+    setCodeStatus("Code copied to clipboard.", false, "panel");
+  } catch (err) {
+    setCodeStatus(`Copy failed: ${err.message}`, true, "panel");
+  }
+}
+
+function onLoadCodeFromPanel() {
+  const raw = ui.importCode?.value || "";
+  loadCodeIntoGame(raw, "panel");
+}
+
+function onStartNewFromMenu() {
+  if (!state.ready) return;
+  hideStartMenu();
+  startNewMatch();
+}
+
+function onStartLoadFromMenu() {
+  const raw = ui.startImportCode?.value || "";
+  loadCodeIntoGame(raw, "start");
+}
+
+function setCodeStatus(message, isError, target = "panel") {
+  const node = target === "start" ? ui.startMenuStatus : ui.codeStatus;
+  if (!node) return;
+  node.textContent = message || "";
+  node.classList.toggle("error", Boolean(message && isError));
+  node.classList.toggle("success", Boolean(message && !isError));
+}
+
+function loadCodeIntoGame(rawInput, target = "panel") {
+  const normalized = String(rawInput || "").trim();
+  if (!normalized) {
+    setCodeStatus("Paste a code first.", true, target);
+    return;
+  }
+
+  try {
+    const snapshot = decodeGameCode(normalized);
+    applySnapshot(snapshot);
+    hideStartMenu();
+    setCodePanelOpen(false);
+    setCodeStatus("Code loaded successfully.", false, target);
+    if (target === "panel" && ui.importCode) {
+      ui.importCode.value = "";
+    }
+    if (target === "start" && ui.startImportCode) {
+      ui.startImportCode.value = "";
+    }
+    refreshExportCode();
+  } catch (err) {
+    setCodeStatus(`Load failed: ${err.message}`, true, target);
+  }
+}
+
 function createPlayer(name, isHuman) {
   return {
     name,
@@ -513,6 +657,561 @@ function createPlayer(name, isHuman) {
     yaku: { points: 0, names: [], triggerKeys: [] },
     yakuSeen: new Set(),
   };
+}
+
+function encodeStateToCode() {
+  const snapshot = buildSnapshot();
+  const json = JSON.stringify(snapshot);
+  const payload = encodeBase64UrlUtf8(json);
+  const checksum = computeCodeChecksum(payload);
+  return `${SAVE_CODE_PREFIX}.${payload}.${checksum}`;
+}
+
+function decodeGameCode(code) {
+  const normalized = String(code || "").trim();
+  const parts = normalized.split(".");
+  if (parts.length !== 3) {
+    throw new Error("Bad format. Expected prefix.payload.checksum");
+  }
+  const [prefix, payload, checksum] = parts;
+  if (prefix !== SAVE_CODE_PREFIX) {
+    throw new Error("Unknown code prefix");
+  }
+  const expected = computeCodeChecksum(payload);
+  if (checksum.toUpperCase() !== expected) {
+    throw new Error("Checksum mismatch");
+  }
+
+  let parsed;
+  try {
+    const json = decodeBase64UrlUtf8(payload);
+    parsed = JSON.parse(json);
+  } catch (err) {
+    throw new Error(`Invalid payload: ${err.message}`);
+  }
+
+  validateSnapshot(parsed);
+  return parsed;
+}
+
+function buildSnapshot() {
+  return {
+    v: SAVE_CODE_VERSION,
+    aiProfile: state.aiProfile,
+    gameNumber: state.gameNumber,
+    maxGames: state.maxGames,
+    dealer: state.dealer,
+    currentPlayer: state.currentPlayer,
+    tableMultiplier: state.tableMultiplier,
+    lastKoiCaller: state.lastKoiCaller,
+    firstYakuPlayer: state.firstYakuPlayer,
+    roundSpecialTwoXPlayer: state.roundSpecialTwoXPlayer,
+    nextRoundSpecialTwoXPlayer: state.nextRoundSpecialTwoXPlayer,
+    roundLeaderAtStart: state.roundLeaderAtStart,
+    previousRoundWinner: state.previousRoundWinner,
+    previousRoundMultiplier: state.previousRoundMultiplier,
+    roundOver: state.roundOver,
+    matchOver: state.matchOver,
+    message: state.message,
+    drawPreview: {
+      cardId: state.drawPreview?.cardId || null,
+      text: state.drawPreview?.text || "",
+    },
+    actionLog: [...state.actionLog],
+    moveCounts: [...state.moveCounts],
+    field: state.field.map((card) => card.id),
+    drawPile: state.drawPile.map((card) => card.id),
+    players: state.players.map((player) => ({
+      score: player.score,
+      hand: player.hand.map((card) => card.id),
+      captured: player.captured.map((card) => card.id),
+      yakuSeen: [...player.yakuSeen],
+    })),
+    pendingSelection: serializePendingSelection(state.pendingSelection),
+    awaitingDeckFlip: serializeAwaitingDeckFlip(state.awaitingDeckFlip),
+    awaitingDecision: serializeAwaitingDecision(state.awaitingDecision),
+    aiPreview: serializeAiPreview(state.aiPreview),
+    cpuPhase1PreviewCardId: state.cpuPhase1PreviewCardId || null,
+  };
+}
+
+function serializePendingSelection(pending) {
+  if (!pending) return null;
+  if (pending.type === "handMatch") {
+    return {
+      type: "handMatch",
+      playerIndex: pending.playerIndex,
+      cardId: pending.cardId,
+      options: [...pending.options],
+    };
+  }
+  if (pending.type === "drawMatch") {
+    return {
+      type: "drawMatch",
+      playerIndex: pending.playerIndex,
+      drawnCardId: pending.drawnCard?.id || null,
+      moveNumber: pending.moveNumber,
+      options: [...pending.options],
+    };
+  }
+  return null;
+}
+
+function serializeAwaitingDeckFlip(flip) {
+  if (!flip) return null;
+  return {
+    playerIndex: flip.playerIndex,
+    moveNumber: flip.moveNumber,
+    drawnCardId: flip.drawnCard?.id || null,
+    revealed: Boolean(flip.revealed),
+  };
+}
+
+function serializeAwaitingDecision(decision) {
+  if (!decision) return null;
+  return {
+    ...decision,
+  };
+}
+
+function serializeAiPreview(aiPreview) {
+  if (!aiPreview) return null;
+  return {
+    options: [...(aiPreview.options || [])],
+    prompt: String(aiPreview.prompt || ""),
+  };
+}
+
+function validateSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    throw new Error("Snapshot must be an object");
+  }
+  if (snapshot.v !== SAVE_CODE_VERSION) {
+    throw new Error(`Unsupported version ${snapshot.v}`);
+  }
+  if (!Array.isArray(snapshot.players) || snapshot.players.length !== 2) {
+    throw new Error("Snapshot must contain exactly two players");
+  }
+  if (!Array.isArray(snapshot.field) || !Array.isArray(snapshot.drawPile)) {
+    throw new Error("Snapshot must include field and draw pile arrays");
+  }
+  if (!Array.isArray(snapshot.moveCounts) || snapshot.moveCounts.length !== 2) {
+    throw new Error("Snapshot moveCounts must have two entries");
+  }
+
+  const maxGames = asInt(snapshot.maxGames, "maxGames");
+  const gameNumber = asInt(snapshot.gameNumber, "gameNumber");
+  if (maxGames < 1 || maxGames > 24) {
+    throw new Error("maxGames out of range");
+  }
+  if (gameNumber < 1 || gameNumber > maxGames) {
+    throw new Error("gameNumber out of range");
+  }
+
+  const dealer = asPlayerIndex(snapshot.dealer, "dealer");
+  const currentPlayer = asPlayerIndex(snapshot.currentPlayer, "currentPlayer");
+  const tableMultiplier = asInt(snapshot.tableMultiplier, "tableMultiplier");
+  if (tableMultiplier < 1 || tableMultiplier > 4) {
+    throw new Error("tableMultiplier out of range");
+  }
+
+  ensureNullablePlayerIndex(snapshot.lastKoiCaller, "lastKoiCaller");
+  ensureNullablePlayerIndex(snapshot.firstYakuPlayer, "firstYakuPlayer");
+  ensureNullablePlayerIndex(snapshot.roundSpecialTwoXPlayer, "roundSpecialTwoXPlayer");
+  ensureNullablePlayerIndex(snapshot.nextRoundSpecialTwoXPlayer, "nextRoundSpecialTwoXPlayer");
+  ensureNullablePlayerIndex(snapshot.roundLeaderAtStart, "roundLeaderAtStart");
+  ensureNullablePlayerIndex(snapshot.previousRoundWinner, "previousRoundWinner");
+
+  // Force card-id validity here and duplicate checks in applySnapshot.
+  snapshot.field.forEach((id, idx) => ensureCardId(id, `field[${idx}]`));
+  snapshot.drawPile.forEach((id, idx) => ensureCardId(id, `drawPile[${idx}]`));
+  snapshot.players.forEach((player, playerIndex) => {
+    if (!player || typeof player !== "object") {
+      throw new Error(`players[${playerIndex}] must be an object`);
+    }
+    asInt(player.score, `players[${playerIndex}].score`);
+    if (!Array.isArray(player.hand) || !Array.isArray(player.captured)) {
+      throw new Error(`players[${playerIndex}] hand/captured must be arrays`);
+    }
+    if (player.yakuSeen !== undefined && !Array.isArray(player.yakuSeen)) {
+      throw new Error(`players[${playerIndex}].yakuSeen must be an array`);
+    }
+    player.hand.forEach((id, idx) => ensureCardId(id, `players[${playerIndex}].hand[${idx}]`));
+    player.captured.forEach((id, idx) => ensureCardId(id, `players[${playerIndex}].captured[${idx}]`));
+  });
+
+  if (snapshot.pendingSelection !== null && snapshot.pendingSelection !== undefined) {
+    validatePendingSelectionSnapshot(snapshot.pendingSelection);
+  }
+  if (snapshot.awaitingDeckFlip !== null && snapshot.awaitingDeckFlip !== undefined) {
+    validateAwaitingDeckFlipSnapshot(snapshot.awaitingDeckFlip);
+  }
+  if (snapshot.awaitingDecision !== null && snapshot.awaitingDecision !== undefined) {
+    validateAwaitingDecisionSnapshot(snapshot.awaitingDecision);
+  }
+
+  // Keep explicit references in case we later add stricter rules.
+  void dealer;
+  void currentPlayer;
+}
+
+function validatePendingSelectionSnapshot(pending) {
+  if (!pending || typeof pending !== "object") {
+    throw new Error("pendingSelection must be an object");
+  }
+  if (pending.type === "handMatch") {
+    asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex");
+    ensureCardId(pending.cardId, "pendingSelection.cardId");
+    if (!Array.isArray(pending.options)) {
+      throw new Error("pendingSelection.options must be an array");
+    }
+    pending.options.forEach((id, idx) => ensureCardId(id, `pendingSelection.options[${idx}]`));
+    return;
+  }
+  if (pending.type === "drawMatch") {
+    asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex");
+    ensureCardId(pending.drawnCardId, "pendingSelection.drawnCardId");
+    asInt(pending.moveNumber, "pendingSelection.moveNumber");
+    if (!Array.isArray(pending.options)) {
+      throw new Error("pendingSelection.options must be an array");
+    }
+    pending.options.forEach((id, idx) => ensureCardId(id, `pendingSelection.options[${idx}]`));
+    return;
+  }
+  throw new Error("pendingSelection has an unknown type");
+}
+
+function validateAwaitingDeckFlipSnapshot(flip) {
+  if (!flip || typeof flip !== "object") {
+    throw new Error("awaitingDeckFlip must be an object");
+  }
+  asPlayerIndex(flip.playerIndex, "awaitingDeckFlip.playerIndex");
+  asInt(flip.moveNumber, "awaitingDeckFlip.moveNumber");
+  ensureCardId(flip.drawnCardId, "awaitingDeckFlip.drawnCardId");
+}
+
+function validateAwaitingDecisionSnapshot(decision) {
+  if (!decision || typeof decision !== "object") {
+    throw new Error("awaitingDecision must be an object");
+  }
+  if (decision.kind !== "stopOrKoi") {
+    throw new Error("awaitingDecision.kind must be stopOrKoi");
+  }
+  asPlayerIndex(decision.playerIndex, "awaitingDecision.playerIndex");
+  asInt(decision.moveNumber, "awaitingDecision.moveNumber");
+  asInt(decision.points, "awaitingDecision.points");
+  asInt(decision.passMultiplier, "awaitingDecision.passMultiplier");
+  asInt(decision.koiMultiplier, "awaitingDecision.koiMultiplier");
+}
+
+function applySnapshot(snapshot) {
+  clearAITask();
+  clearDrawRevealTask();
+  resetDrawPreviewFx();
+
+  state.aiProfile = AI_PROFILES[snapshot.aiProfile] ? snapshot.aiProfile : DEFAULT_AI_PROFILE;
+  state.gameNumber = asInt(snapshot.gameNumber, "gameNumber");
+  state.maxGames = asInt(snapshot.maxGames, "maxGames");
+  state.dealer = asPlayerIndex(snapshot.dealer, "dealer");
+  state.currentPlayer = asPlayerIndex(snapshot.currentPlayer, "currentPlayer");
+  state.tableMultiplier = asInt(snapshot.tableMultiplier, "tableMultiplier");
+  state.lastKoiCaller = asNullablePlayerIndex(snapshot.lastKoiCaller, "lastKoiCaller");
+  state.firstYakuPlayer = asNullablePlayerIndex(snapshot.firstYakuPlayer, "firstYakuPlayer");
+  state.roundSpecialTwoXPlayer = asNullablePlayerIndex(
+    snapshot.roundSpecialTwoXPlayer,
+    "roundSpecialTwoXPlayer"
+  );
+  state.nextRoundSpecialTwoXPlayer = asNullablePlayerIndex(
+    snapshot.nextRoundSpecialTwoXPlayer,
+    "nextRoundSpecialTwoXPlayer"
+  );
+  state.roundLeaderAtStart = asNullablePlayerIndex(snapshot.roundLeaderAtStart, "roundLeaderAtStart");
+  state.previousRoundWinner = asNullablePlayerIndex(snapshot.previousRoundWinner, "previousRoundWinner");
+  state.previousRoundMultiplier =
+    snapshot.previousRoundMultiplier === null || snapshot.previousRoundMultiplier === undefined
+      ? null
+      : asInt(snapshot.previousRoundMultiplier, "previousRoundMultiplier");
+  state.roundOver = Boolean(snapshot.roundOver);
+  state.matchOver = Boolean(snapshot.matchOver);
+  state.message = String(snapshot.message || "");
+  state.drawPreview = {
+    cardId: snapshot.drawPreview?.cardId || null,
+    text: String(snapshot.drawPreview?.text || "Waiting for draw."),
+  };
+
+  state.players = [createPlayer("You", true), createPlayer("CPU", false)];
+  for (let i = 0; i < 2; i += 1) {
+    const source = snapshot.players[i];
+    const target = state.players[i];
+    target.score = Math.max(0, asInt(source.score, `players[${i}].score`));
+    target.hand = sortByMonth(cardIdsToCards(source.hand, `players[${i}].hand`));
+    target.captured = cardIdsToCards(source.captured, `players[${i}].captured`);
+    target.yakuSeen = new Set(Array.isArray(source.yakuSeen) ? source.yakuSeen.map(String) : []);
+    target.yaku = computeYaku(target.captured, state.gameNumber);
+    if (!target.yakuSeen.size) {
+      target.yakuSeen = new Set(target.yaku.triggerKeys);
+    }
+  }
+
+  state.field = cardIdsToCards(snapshot.field, "field");
+  state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
+  state.moveCounts = [
+    Math.max(0, asInt(snapshot.moveCounts[0], "moveCounts[0]")),
+    Math.max(0, asInt(snapshot.moveCounts[1], "moveCounts[1]")),
+  ];
+  state.actionLog = Array.isArray(snapshot.actionLog)
+    ? snapshot.actionLog.map((line) => String(line)).slice(-ACTION_LOG_LIMIT)
+    : [];
+
+  state.pendingSelection = hydratePendingSelection(snapshot.pendingSelection);
+  state.awaitingDeckFlip = hydrateAwaitingDeckFlip(snapshot.awaitingDeckFlip);
+  state.awaitingDecision = hydrateAwaitingDecision(snapshot.awaitingDecision);
+  state.aiPreview = hydrateAiPreview(snapshot.aiPreview);
+  state.cpuPhase1PreviewCardId = snapshot.cpuPhase1PreviewCardId || null;
+
+  validateHydratedStateCardOwnership();
+  state.autoFocusTargetKey = null;
+  renderAll();
+  resumeLoadedStateFlow();
+}
+
+function hydratePendingSelection(pending) {
+  if (!pending) return null;
+  if (pending.type === "handMatch") {
+    return {
+      type: "handMatch",
+      playerIndex: asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex"),
+      cardId: String(pending.cardId),
+      options: pending.options.map(String),
+    };
+  }
+  if (pending.type === "drawMatch") {
+    return {
+      type: "drawMatch",
+      playerIndex: asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex"),
+      drawnCard: cardByIdOrThrow(pending.drawnCardId, "pendingSelection.drawnCardId"),
+      moveNumber: asInt(pending.moveNumber, "pendingSelection.moveNumber"),
+      options: pending.options.map(String),
+    };
+  }
+  return null;
+}
+
+function hydrateAwaitingDeckFlip(flip) {
+  if (!flip) return null;
+  return {
+    playerIndex: asPlayerIndex(flip.playerIndex, "awaitingDeckFlip.playerIndex"),
+    moveNumber: asInt(flip.moveNumber, "awaitingDeckFlip.moveNumber"),
+    drawnCard: cardByIdOrThrow(flip.drawnCardId, "awaitingDeckFlip.drawnCardId"),
+    revealed: Boolean(flip.revealed),
+  };
+}
+
+function hydrateAwaitingDecision(decision) {
+  if (!decision) return null;
+  return {
+    ...decision,
+    kind: "stopOrKoi",
+    playerIndex: asPlayerIndex(decision.playerIndex, "awaitingDecision.playerIndex"),
+    moveNumber: asInt(decision.moveNumber, "awaitingDecision.moveNumber"),
+    points: asInt(decision.points, "awaitingDecision.points"),
+    passMultiplier: asInt(decision.passMultiplier, "awaitingDecision.passMultiplier"),
+    koiMultiplier: asInt(decision.koiMultiplier, "awaitingDecision.koiMultiplier"),
+    canPass: Boolean(decision.canPass),
+    forcedByFinalRound: Boolean(decision.forcedByFinalRound),
+    resumeDrawPhase: Boolean(decision.resumeDrawPhase),
+    yakuText: String(decision.yakuText || ""),
+    specialTwoXActive: Boolean(decision.specialTwoXActive),
+    prompt: String(decision.prompt || ""),
+  };
+}
+
+function hydrateAiPreview(aiPreview) {
+  if (!aiPreview) return null;
+  return {
+    options: Array.isArray(aiPreview.options) ? aiPreview.options.map(String) : [],
+    prompt: String(aiPreview.prompt || ""),
+  };
+}
+
+function validateHydratedStateCardOwnership() {
+  const ownership = new Map();
+  const claim = (id, bucket) => {
+    if (ownership.has(id)) {
+      throw new Error(`Card ${id} appears in both ${ownership.get(id)} and ${bucket}`);
+    }
+    ownership.set(id, bucket);
+  };
+
+  state.field.forEach((card) => claim(card.id, "field"));
+  state.drawPile.forEach((card) => claim(card.id, "drawPile"));
+  state.players.forEach((player, playerIndex) => {
+    player.hand.forEach((card) => claim(card.id, `players[${playerIndex}].hand`));
+    player.captured.forEach((card) => claim(card.id, `players[${playerIndex}].captured`));
+  });
+  if (state.pendingSelection?.type === "drawMatch") {
+    claim(state.pendingSelection.drawnCard.id, "pendingSelection.drawnCard");
+  }
+  if (state.awaitingDeckFlip) {
+    claim(state.awaitingDeckFlip.drawnCard.id, "awaitingDeckFlip.drawnCard");
+  }
+
+  if (ownership.size > CARD_DECK.length) {
+    throw new Error("Snapshot references too many cards");
+  }
+
+  if (state.pendingSelection) {
+    const optionSet = new Set(state.field.map((card) => card.id));
+    for (const optionId of state.pendingSelection.options) {
+      if (!optionSet.has(optionId)) {
+        throw new Error("pendingSelection references a field card that is not on the field");
+      }
+    }
+    if (state.pendingSelection.type === "handMatch") {
+      const handSet = new Set(state.players[state.pendingSelection.playerIndex].hand.map((card) => card.id));
+      if (!handSet.has(state.pendingSelection.cardId)) {
+        throw new Error("pendingSelection hand card is missing");
+      }
+    }
+  }
+}
+
+function resumeLoadedStateFlow() {
+  if (state.roundOver || state.matchOver) return;
+  if (state.awaitingDecision) {
+    if (state.awaitingDecision.playerIndex === 1) {
+      scheduleAIStep(AI_STEP_DECISION_MS, resolveCpuPendingDecision);
+    }
+    return;
+  }
+
+  if (state.awaitingDeckFlip) {
+    if (state.awaitingDeckFlip.playerIndex === 1) {
+      resumeCpuDeckFlipFlow(state.awaitingDeckFlip);
+    }
+    return;
+  }
+
+  if (state.currentPlayer === 1) {
+    queueAITurn(420);
+  }
+}
+
+function resolveCpuPendingDecision() {
+  if (!state.awaitingDecision || state.awaitingDecision.kind !== "stopOrKoi") return;
+  if (state.awaitingDecision.playerIndex !== 1) return;
+  const decision = state.awaitingDecision;
+  if (state.roundOver || state.currentPlayer !== decision.playerIndex) return;
+  const action = chooseAIDecision(decision);
+  if (action === "pass" && decision.canPass) {
+    logPlayerMove(
+      decision.playerIndex,
+      decision.moveNumber,
+      `Pass at ${decision.passMultiplier}x with ${decision.yakuText}.`
+    );
+    endRoundWithWinner(decision.playerIndex, decision.points, decision.passMultiplier, "passed");
+    return;
+  }
+  applyKoiAndContinue(decision);
+}
+
+function resumeCpuDeckFlipFlow(flip) {
+  if (!flip || flip.playerIndex !== 1) return;
+  const drawn = flip.drawnCard;
+  if (!drawn) return;
+
+  if (flip.revealed) {
+    scheduleAIStep(CPU_DRAW_REVEAL_LINGER_MS, () => {
+      if (!state.awaitingDeckFlip) return;
+      if (state.awaitingDeckFlip.playerIndex !== 1 || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
+      if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision || state.pendingSelection) return;
+      const moveNumber = state.awaitingDeckFlip.moveNumber;
+      state.awaitingDeckFlip = null;
+      resolveRevealedDrawForCpu(1, moveNumber, drawn);
+    });
+    return;
+  }
+
+  scheduleAIStep(CPU_DECK_FLIP_DELAY_MS, () => {
+    if (!state.awaitingDeckFlip) return;
+    if (state.awaitingDeckFlip.playerIndex !== 1 || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
+    if (state.roundOver || state.currentPlayer !== 1) return;
+    state.awaitingDeckFlip.revealed = true;
+    state.drawPreview = {
+      cardId: drawn.id,
+      text: `Pulled ${drawn.name}.`,
+    };
+    renderAll();
+    resumeCpuDeckFlipFlow(state.awaitingDeckFlip);
+  });
+}
+
+function asInt(value, label) {
+  if (!Number.isInteger(value)) {
+    throw new Error(`${label} must be an integer`);
+  }
+  return value;
+}
+
+function asPlayerIndex(value, label) {
+  const parsed = asInt(value, label);
+  if (parsed !== 0 && parsed !== 1) {
+    throw new Error(`${label} must be 0 or 1`);
+  }
+  return parsed;
+}
+
+function ensureNullablePlayerIndex(value, label) {
+  asNullablePlayerIndex(value, label);
+}
+
+function asNullablePlayerIndex(value, label) {
+  if (value === null || value === undefined) return null;
+  return asPlayerIndex(value, label);
+}
+
+function ensureCardId(id, label) {
+  if (typeof id !== "string" || !CARD_BY_ID.has(id)) {
+    throw new Error(`${label} contains unknown card id`);
+  }
+}
+
+function cardByIdOrThrow(id, label) {
+  ensureCardId(id, label);
+  return CARD_BY_ID.get(id);
+}
+
+function cardIdsToCards(ids, label) {
+  if (!Array.isArray(ids)) {
+    throw new Error(`${label} must be an array`);
+  }
+  return ids.map((id, index) => cardByIdOrThrow(id, `${label}[${index}]`));
+}
+
+function encodeBase64UrlUtf8(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeBase64UrlUtf8(value) {
+  const normalized = String(value).replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(normalized + padding);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function computeCodeChecksum(payload) {
+  let hash = 2166136261;
+  for (let i = 0; i < payload.length; i += 1) {
+    hash ^= payload.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).toUpperCase();
 }
 
 function nextMoveNumber(playerIndex) {
@@ -539,6 +1238,9 @@ function pushActionLog(prefix, text) {
 }
 
 function startNewMatch() {
+  hideStartMenu();
+  setCodePanelOpen(false);
+  setCodeStatus("", false, "panel");
   clearAITask();
   state.aiProfile = pickRandomAIProfile();
   state.players = [createPlayer("You", true), createPlayer("CPU", false)];
@@ -555,6 +1257,7 @@ function startNewMatch() {
   state.matchOver = false;
   addSystemLog("New match started.");
   startRound();
+  refreshExportCode();
 }
 
 function pickRandomAIProfile() {
@@ -1874,6 +2577,13 @@ function renderAll() {
   renderCaptured();
   renderContextBar();
   paintAllCards();
+  if (ui.codePanel && !ui.codePanel.hidden && state.players.length) {
+    try {
+      ui.exportCode.value = encodeStateToCode();
+    } catch (_err) {
+      // Leave last value if encoding fails during an in-flight transient state.
+    }
+  }
   focusActiveActionTarget();
 }
 
