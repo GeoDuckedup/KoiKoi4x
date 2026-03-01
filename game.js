@@ -350,8 +350,8 @@ const AI_STEP_CPU_PHASE1_PREVIEW_MS = 520;
 const AI_STEP_TARGET_MS = 340;
 const AI_STEP_DRAW_RESOLVE_MS = 360;
 const AI_STEP_DECISION_MS = 420;
-const SAVE_CODE_PREFIX = "HKK1";
-const SAVE_CODE_VERSION = 1;
+const SAVE_CODE_PREFIX = "HKK2";
+const SAVE_CODE_VERSION = 2;
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -381,6 +381,7 @@ const state = {
   roundLeaderAtStart: null,
   previousRoundWinner: null,
   previousRoundMultiplier: null,
+  roundHistory: [],
   drawPreview: {
     cardId: null,
     text: "Waiting for draw.",
@@ -444,11 +445,12 @@ function init() {
 }
 
 function cacheUI() {
-  ui.cpuScore = document.getElementById("cpu-score");
-  ui.playerScore = document.getElementById("player-score");
-  ui.gameCounter = document.getElementById("game-counter");
-  ui.dealerLabel = document.getElementById("dealer-label");
-  ui.turnLabel = document.getElementById("turn-label");
+  ui.cpuScoreInline = document.getElementById("cpu-score-inline");
+  ui.playerScoreInline = document.getElementById("player-score-inline");
+  ui.turnMeta = document.getElementById("turn-meta");
+  ui.gameSummaryToggle = document.getElementById("game-summary-toggle");
+  ui.gameSummaryPanel = document.getElementById("game-summary-panel");
+  ui.roundSummaryBody = document.getElementById("round-summary-body");
   ui.cpuHandCount = document.getElementById("cpu-hand-count");
   ui.deckCount = document.getElementById("deck-count");
   ui.cpuCapturedCount = document.getElementById("cpu-captured-count");
@@ -497,6 +499,7 @@ function bindUI() {
   ui.field.addEventListener("click", onFieldClick);
   ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
+  ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
   ui.refreshCodeBtn?.addEventListener("click", onRefreshCode);
@@ -534,6 +537,8 @@ function showStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = false;
   }
+  setLogPanelOpen(false);
+  setGameSummaryPanelOpen(false);
   setCodePanelOpen(false);
   setCodeStatus("", false, "start");
 }
@@ -560,6 +565,16 @@ function setLogPanelOpen(open) {
 function onToggleLogPanel() {
   const nextOpen = ui.messageZone?.hidden !== false;
   setLogPanelOpen(nextOpen);
+}
+
+function setGameSummaryPanelOpen(open) {
+  if (!ui.gameSummaryPanel || !ui.gameSummaryToggle) return;
+  ui.gameSummaryPanel.hidden = !open;
+}
+
+function onToggleGameSummaryPanel() {
+  const nextOpen = ui.gameSummaryPanel?.hidden !== false;
+  setGameSummaryPanelOpen(nextOpen);
 }
 
 function onToggleCodePanel() {
@@ -733,6 +748,7 @@ function buildSnapshot() {
     },
     actionLog: [...state.actionLog],
     moveCounts: [...state.moveCounts],
+    roundHistory: state.roundHistory.map((entry) => ({ ...entry })),
     field: state.field.map((card) => card.id),
     drawPile: state.drawPile.map((card) => card.id),
     players: state.players.map((player) => ({
@@ -812,6 +828,9 @@ function validateSnapshot(snapshot) {
   if (!Array.isArray(snapshot.moveCounts) || snapshot.moveCounts.length !== 2) {
     throw new Error("Snapshot moveCounts must have two entries");
   }
+  if (!Array.isArray(snapshot.roundHistory)) {
+    throw new Error("Snapshot roundHistory must be an array");
+  }
 
   const maxGames = asInt(snapshot.maxGames, "maxGames");
   const gameNumber = asInt(snapshot.gameNumber, "gameNumber");
@@ -835,6 +854,7 @@ function validateSnapshot(snapshot) {
   ensureNullablePlayerIndex(snapshot.nextRoundSpecialTwoXPlayer, "nextRoundSpecialTwoXPlayer");
   ensureNullablePlayerIndex(snapshot.roundLeaderAtStart, "roundLeaderAtStart");
   ensureNullablePlayerIndex(snapshot.previousRoundWinner, "previousRoundWinner");
+  snapshot.roundHistory.forEach((entry, idx) => validateRoundHistoryEntry(entry, idx, maxGames));
 
   // Force card-id validity here and duplicate checks in applySnapshot.
   snapshot.field.forEach((id, idx) => ensureCardId(id, `field[${idx}]`));
@@ -976,6 +996,7 @@ function applySnapshot(snapshot) {
   state.actionLog = Array.isArray(snapshot.actionLog)
     ? snapshot.actionLog.map((line) => String(line)).slice(-ACTION_LOG_LIMIT)
     : [];
+  state.roundHistory = snapshot.roundHistory.map((entry, idx) => normalizeRoundHistoryEntry(entry, idx, state.maxGames));
 
   state.pendingSelection = hydratePendingSelection(snapshot.pendingSelection);
   state.awaitingDeckFlip = hydrateAwaitingDeckFlip(snapshot.awaitingDeckFlip);
@@ -1045,6 +1066,36 @@ function hydrateAiPreview(aiPreview) {
   return {
     options: Array.isArray(aiPreview.options) ? aiPreview.options.map(String) : [],
     prompt: String(aiPreview.prompt || ""),
+  };
+}
+
+function validateRoundHistoryEntry(entry, idx, maxGames) {
+  if (!entry || typeof entry !== "object") {
+    throw new Error(`roundHistory[${idx}] must be an object`);
+  }
+  const month = asInt(entry.month, `roundHistory[${idx}].month`);
+  if (month < 1 || month > maxGames) {
+    throw new Error(`roundHistory[${idx}].month out of range`);
+  }
+  const you = asInt(entry.you, `roundHistory[${idx}].you`);
+  const cpu = asInt(entry.cpu, `roundHistory[${idx}].cpu`);
+  if (you < 0 || cpu < 0) {
+    throw new Error(`roundHistory[${idx}] scores must be non-negative`);
+  }
+  const multiplier = asInt(entry.multiplier, `roundHistory[${idx}].multiplier`);
+  if (multiplier < 1 || multiplier > 4) {
+    throw new Error(`roundHistory[${idx}].multiplier out of range`);
+  }
+}
+
+function normalizeRoundHistoryEntry(entry, idx, maxGames) {
+  validateRoundHistoryEntry(entry, idx, maxGames);
+  return {
+    month: entry.month,
+    you: entry.you,
+    cpu: entry.cpu,
+    multiplier: entry.multiplier,
+    noScore: Boolean(entry.noScore),
   };
 }
 
@@ -1254,6 +1305,8 @@ function pushActionLog(prefix, text) {
 function startNewMatch() {
   hideStartMenu();
   setCodePanelOpen(false);
+  setLogPanelOpen(false);
+  setGameSummaryPanelOpen(false);
   setCodeStatus("", false, "panel");
   clearAITask();
   state.aiProfile = pickRandomAIProfile();
@@ -1266,6 +1319,7 @@ function startNewMatch() {
   state.roundLeaderAtStart = null;
   state.previousRoundWinner = null;
   state.previousRoundMultiplier = null;
+  state.roundHistory = [];
   state.actionLog = [];
   state.moveCounts = [0, 0];
   state.matchOver = false;
@@ -2186,6 +2240,13 @@ function endRoundDraw() {
   state.nextRoundSpecialTwoXPlayer = null;
   state.previousRoundWinner = null;
   state.previousRoundMultiplier = null;
+  state.roundHistory.push({
+    month: state.gameNumber,
+    you: 0,
+    cpu: 0,
+    multiplier: state.tableMultiplier,
+    noScore: true,
+  });
 
   // Keep starter from the most recent scored-round outcome.
   // A no-scorer round does not flip who starts the next round.
@@ -2216,6 +2277,13 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
   const loserIndex = winnerIndex === 0 ? 1 : 0;
   const scored = basePoints * multiplierUsed;
   winner.score += scored;
+  state.roundHistory.push({
+    month: state.gameNumber,
+    you: winnerIndex === 0 ? scored : 0,
+    cpu: winnerIndex === 1 ? scored : 0,
+    multiplier: multiplierUsed,
+    noScore: false,
+  });
 
   state.previousRoundWinner = winnerIndex;
   state.previousRoundMultiplier = multiplierUsed;
@@ -2582,6 +2650,7 @@ function computeYaku(captured, roundMonth) {
 
 function renderAll() {
   renderTop();
+  renderRoundSummary();
   renderActionLog();
   renderChoiceMode();
   renderHands();
@@ -2687,14 +2756,13 @@ function scrollTargetIntoViewSmart(target) {
 }
 
 function renderTop() {
-  ui.cpuScore.textContent = String(state.players[1].score);
-  ui.playerScore.textContent = String(state.players[0].score);
-
-  ui.gameCounter.textContent = `Game ${state.gameNumber} / ${state.maxGames}`;
-  ui.dealerLabel.textContent = `Starts: ${state.players[state.dealer].name}`;
-  ui.turnLabel.textContent = state.roundOver
-    ? "Turn: round ended"
-    : `Turn: ${state.players[state.currentPlayer].name}`;
+  if (ui.cpuScoreInline) ui.cpuScoreInline.textContent = String(state.players[1].score);
+  if (ui.playerScoreInline) ui.playerScoreInline.textContent = String(state.players[0].score);
+  if (ui.gameSummaryToggle) ui.gameSummaryToggle.textContent = `Game ${state.gameNumber} / ${state.maxGames}`;
+  if (ui.turnMeta) {
+    const turnText = state.roundOver ? "round ended" : state.players[state.currentPlayer].name;
+    ui.turnMeta.textContent = `Starts: ${state.players[state.dealer].name} | Turn: ${turnText}`;
+  }
 
   ui.cpuHandCount.textContent = `${state.players[1].hand.length} cards`;
   ui.deckCount.textContent = `Deck: ${state.drawPile.length}`;
@@ -2710,6 +2778,31 @@ function renderTop() {
   const clampedMult = Math.max(1, Math.min(4, state.tableMultiplier));
   ui.koiState.classList.remove("mult-1", "mult-2", "mult-3", "mult-4");
   ui.koiState.classList.add(`mult-${clampedMult}`);
+}
+
+function renderRoundSummary() {
+  if (!ui.roundSummaryBody) return;
+  const playedByMonth = new Map();
+  for (const entry of state.roundHistory) {
+    if (!entry || typeof entry.month !== "number") continue;
+    playedByMonth.set(entry.month, entry);
+  }
+
+  const rows = [];
+  for (let month = 1; month <= state.maxGames; month += 1) {
+    const monthName = MONTHS[month - 1]?.name || `Round ${month}`;
+    const entry = playedByMonth.get(month);
+    if (!entry) {
+      rows.push(
+        `<tr><td>${monthName}</td><td class=\"summary-empty\">-</td><td class=\"summary-empty\">-</td><td class=\"summary-empty\">-</td></tr>`
+      );
+      continue;
+    }
+    const multLabel = `${entry.multiplier}x`;
+    const multClass = entry.noScore ? "summary-noscore" : "";
+    rows.push(`<tr><td>${monthName}</td><td>${entry.you}</td><td>${entry.cpu}</td><td class=\"${multClass}\">${multLabel}</td></tr>`);
+  }
+  ui.roundSummaryBody.innerHTML = rows.join("");
 }
 
 function renderActionLog() {
@@ -3264,6 +3357,7 @@ function renderGameToText() {
     },
     context,
     draw_preview: state.drawPreview,
+    round_history: state.roundHistory.map((entry) => ({ ...entry })),
     message: state.message,
     action_log_tail: state.actionLog.slice(-10),
   };

@@ -10,7 +10,7 @@
     <main class="app">
       <section class="opponent-zone">
         <div class="zone-header">
-          <span>CPU Hand</span>
+          <span class="zone-title-with-score">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
           <span id="cpu-hand-count">8 cards</span>
         </div>
         <div id="cpu-hand" class="cpu-hand-strip"></div>
@@ -45,6 +45,7 @@
         <div class="field-koi-row">
           <span id="koi-state" class="koi-state mult-1">Table 1x | Last Koi-Koi: none</span>
         </div>
+        <div id="turn-meta" class="turn-meta">Starts: You | Turn: You</div>
         <div class="field-layout">
           <div id="field" class="field-grid"></div>
           <aside id="draw-preview" class="draw-preview">
@@ -59,7 +60,7 @@
 
       <section id="player-zone" class="player-zone">
         <div class="zone-header">
-          <span>Your Hand</span>
+          <span class="zone-title-with-score">Your Hand <strong id="player-score-inline" class="header-score">0</strong></span>
         </div>
         <div id="hand-lock-note" class="hand-lock-note is-muted"></div>
         <div id="player-hand" class="hand player"></div>
@@ -74,32 +75,34 @@
         </button>
       </section>
 
-      <section class="score-panel">
-        <div class="score-box">
-          <span>CPU</span>
-          <strong id="cpu-score">0</strong>
-        </div>
-        <div class="meta-box">
-          <div id="game-counter">Game 1 / 12</div>
-          <div id="dealer-label">Dealer: You</div>
-          <div id="turn-label">Turn: You</div>
-        </div>
-        <div class="score-box">
-          <span>You</span>
-          <strong id="player-score">0</strong>
-        </div>
-      </section>
-
       <header class="top">
         <div>
           <h1>Hanafuda Koi-Koi</h1>
         </div>
         <div class="top-actions">
+          <button id="game-summary-toggle" class="ghost" type="button">Game 1 / 12</button>
           <button id="log-toggle" class="ghost" type="button">Action Log</button>
           <button id="code-toggle" class="ghost" type="button">Code</button>
           <button id="rules-toggle" class="ghost" type="button">Rules</button>
         </div>
       </header>
+
+      <section id="game-summary-panel" class="summary-panel" hidden>
+        <div class="summary-panel-head">Round Summary</div>
+        <div class="summary-table-wrap">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th>You</th>
+                <th>CPU</th>
+                <th>Mult</th>
+              </tr>
+            </thead>
+            <tbody id="round-summary-body"></tbody>
+          </table>
+        </div>
+      </section>
 
       <section id="code-panel" class="code-panel" hidden>
         <div class="code-panel-head">Save / Load Code</div>
