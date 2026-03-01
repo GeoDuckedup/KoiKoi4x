@@ -456,14 +456,13 @@ function cacheUI() {
   ui.cpuYaku = document.getElementById("cpu-yaku");
   ui.playerYaku = document.getElementById("player-yaku");
   ui.koiState = document.getElementById("koi-state");
+  ui.logToggle = document.getElementById("log-toggle");
+  ui.messageZone = document.getElementById("message-zone");
   ui.actionLog = document.getElementById("action-log");
   ui.logCount = document.getElementById("log-count");
   ui.cpuHand = document.getElementById("cpu-hand");
   ui.playerHand = document.getElementById("player-hand");
   ui.field = document.getElementById("field");
-  ui.cpuAvatar = document.getElementById("cpu-avatar");
-  ui.cpuPhase1PreviewCanvas = document.getElementById("cpu-phase1-preview-canvas");
-  ui.cpuProfileName = document.getElementById("cpu-profile-name");
   ui.drawPreviewCanvas = document.getElementById("draw-preview-canvas");
   ui.drawPreviewText = document.getElementById("draw-preview-text");
   ui.drawPreview = document.getElementById("draw-preview");
@@ -498,11 +497,15 @@ function bindUI() {
   ui.field.addEventListener("click", onFieldClick);
   ui.drawPreview?.addEventListener("click", onDrawPreviewClick);
   ui.contextZone.addEventListener("click", onContextActionClick);
+  ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
   ui.refreshCodeBtn?.addEventListener("click", onRefreshCode);
   ui.copyCodeBtn?.addEventListener("click", onCopyCode);
   ui.loadCodeBtn?.addEventListener("click", onLoadCodeFromPanel);
-  ui.closeCodeBtn?.addEventListener("click", () => setCodePanelOpen(false));
+  ui.closeCodeBtn?.addEventListener("click", () => {
+    setCodePanelOpen(false);
+    showStartMenu();
+  });
   ui.startNewBtn?.addEventListener("click", onStartNewFromMenu);
   ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.rulesToggle.addEventListener("click", () => {
@@ -546,6 +549,17 @@ function setCodePanelOpen(open) {
   if (!ui.codePanel || !ui.codeToggle) return;
   ui.codePanel.hidden = !open;
   ui.codeToggle.textContent = open ? "Hide Code" : "Code";
+}
+
+function setLogPanelOpen(open) {
+  if (!ui.messageZone || !ui.logToggle) return;
+  ui.messageZone.hidden = !open;
+  ui.logToggle.textContent = open ? "Hide Log" : "Action Log";
+}
+
+function onToggleLogPanel() {
+  const nextOpen = ui.messageZone?.hidden !== false;
+  setLogPanelOpen(nextOpen);
 }
 
 function onToggleCodePanel() {
@@ -2573,7 +2587,6 @@ function renderAll() {
   renderHands();
   renderField();
   renderDrawPreview();
-  renderCpuProfile();
   renderCaptured();
   renderContextBar();
   paintAllCards();
@@ -2738,10 +2751,26 @@ function renderBadgedCardContent(card) {
 }
 
 function renderHands() {
-  const cpuCount = state.players[1].hand.length;
+  const cpuHand = state.players[1].hand;
+  const previewId = state.cpuPhase1PreviewCardId;
+  let displayHand = cpuHand;
+  if (previewId) {
+    const previewIdx = cpuHand.findIndex((card) => card.id === previewId);
+    if (previewIdx > 0) {
+      const previewCard = cpuHand[previewIdx];
+      displayHand = [previewCard, ...cpuHand.slice(0, previewIdx), ...cpuHand.slice(previewIdx + 1)];
+    }
+  }
   ui.cpuHand.innerHTML = Array.from({ length: 8 }, (_, i) => {
-    const statusClass = i < cpuCount ? "filled" : "empty";
-    return `<div class="cpu-card-indicator ${statusClass}"></div>`;
+    if (i < displayHand.length) {
+      const card = displayHand[i];
+      const isRevealed = previewId === card.id;
+      if (isRevealed) {
+        return `<div class="card badged cpu-revealed" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`;
+      }
+      return `<div class="card-back"></div>`;
+    }
+    return `<div class="card-back empty"></div>`;
   }).join("");
 
   const pending = state.pendingSelection;
@@ -2798,36 +2827,6 @@ function renderField() {
       return `<button type="button" class="${classes.join(" ")}" data-card-id="${card.id}" data-card-type="${card.type}"${disabled}>${renderBadgedCardContent(card)}</button>`;
     })
     .join("");
-}
-
-function renderCpuProfile() {
-  const profile = CPU_PROFILE_META[state.aiProfile] || CPU_PROFILE_META[DEFAULT_AI_PROFILE];
-  const previewCardId = state.cpuPhase1PreviewCardId;
-  const previewCard = previewCardId ? CARD_BY_ID.get(previewCardId) : null;
-
-  if (ui.cpuAvatar) {
-    ui.cpuAvatar.src = profile.avatar;
-    ui.cpuAvatar.alt = profile.name;
-    ui.cpuAvatar.hidden = Boolean(previewCard);
-  }
-
-  if (ui.cpuPhase1PreviewCanvas) {
-    if (previewCard) {
-      ui.cpuPhase1PreviewCanvas.hidden = false;
-      ui.cpuPhase1PreviewCanvas.dataset.cardId = previewCard.id;
-    } else {
-      ui.cpuPhase1PreviewCanvas.hidden = true;
-      delete ui.cpuPhase1PreviewCanvas.dataset.cardId;
-      const ctx = ui.cpuPhase1PreviewCanvas.getContext("2d");
-      if (ctx) {
-        ctx.clearRect(0, 0, ui.cpuPhase1PreviewCanvas.width, ui.cpuPhase1PreviewCanvas.height);
-      }
-    }
-  }
-
-  if (ui.cpuProfileName) {
-    ui.cpuProfileName.textContent = previewCard ? "CPU Selected" : profile.name;
-  }
 }
 
 function renderDrawPreview() {

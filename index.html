@@ -13,14 +13,7 @@
           <span>CPU Hand</span>
           <span id="cpu-hand-count">8 cards</span>
         </div>
-        <div class="opponent-layout">
-          <div id="cpu-hand" class="cpu-hand-strip"></div>
-          <aside id="cpu-profile" class="cpu-profile">
-            <img id="cpu-avatar" alt="CPU profile avatar" />
-            <canvas id="cpu-phase1-preview-canvas" class="cpu-phase1-preview-canvas" width="138" height="170" hidden></canvas>
-            <div id="cpu-profile-name" class="cpu-profile-name">The Monk</div>
-          </aside>
-        </div>
+        <div id="cpu-hand" class="cpu-hand-strip"></div>
       </section>
 
       <section class="captured-zone">
@@ -97,21 +90,12 @@
         </div>
       </section>
 
-      <section class="message-zone">
-        <div class="zone-header compact">
-          <span>Action Log</span>
-          <span id="log-count">0</span>
-        </div>
-        <ol id="action-log" class="action-log">
-          <li>SYS: Loading cards...</li>
-        </ol>
-      </section>
-
       <header class="top">
         <div>
           <h1>Hanafuda Koi-Koi</h1>
         </div>
         <div class="top-actions">
+          <button id="log-toggle" class="ghost" type="button">Action Log</button>
           <button id="code-toggle" class="ghost" type="button">Code</button>
           <button id="rules-toggle" class="ghost" type="button">Rules</button>
         </div>
@@ -129,7 +113,7 @@
         <textarea id="import-code" class="code-text" placeholder="Paste a code here"></textarea>
         <div class="code-actions">
           <button id="load-code-btn" type="button">Load Code</button>
-          <button id="close-code-btn" type="button" class="ghost">Close</button>
+          <button id="close-code-btn" type="button" class="ghost">Back to Menu</button>
         </div>
         <div id="code-status" class="code-status"></div>
       </section>
@@ -244,6 +228,16 @@
             </details>
           </article>
         </div>
+      </section>
+
+      <section id="message-zone" class="message-zone" hidden>
+        <div class="zone-header compact">
+          <span>Action Log</span>
+          <span id="log-count">0</span>
+        </div>
+        <ol id="action-log" class="action-log">
+          <li>SYS: Loading cards...</li>
+        </ol>
       </section>
     </main>
 
