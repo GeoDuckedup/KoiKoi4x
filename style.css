@@ -843,10 +843,14 @@ button.ghost {
   color: #5f4b35;
 }
 
-.friend-turn-code-wrap {
+.manual-load-wrap {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.manual-load-wrap[hidden] {
+  display: none !important;
 }
 
 .friend-interstitial-actions {

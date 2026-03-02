@@ -259,10 +259,15 @@
           <button id="start-mode-friend-btn" type="button">Play with Friend</button>
         </div>
         <div class="start-subtitle">Friend mode supports both pass-device and turn-code handoff each turn.</div>
-        <label class="code-label" for="start-import-code">Enter Link or Code</label>
-        <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share link or code here"></textarea>
         <div class="start-actions">
-          <button id="start-load-btn" type="button">Load</button>
+          <button id="start-load-btn" type="button">Load Turn Link</button>
+        </div>
+        <div id="start-manual-load-wrap" class="manual-load-wrap" hidden>
+          <label class="code-label" for="start-import-code">Load turn link or code</label>
+          <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share link or code here"></textarea>
+          <div class="start-actions">
+            <button id="start-load-manual-btn" type="button">Load Pasted Link</button>
+          </div>
         </div>
         <div id="start-menu-status" class="code-status"></div>
       </div>
@@ -272,17 +277,16 @@
       <div class="friend-interstitial-card">
         <h2 id="friend-interstitial-title">Friend Turn Handoff</h2>
         <p id="friend-interstitial-text">Turn complete. Pass device or share turn link.</p>
-        <div id="friend-turn-code-wrap" class="friend-turn-code-wrap" hidden>
-          <label class="code-label" for="friend-turn-code">Turn link</label>
-          <textarea id="friend-turn-code" class="code-text" readonly></textarea>
-        </div>
-        <div class="friend-turn-code-wrap">
+        <div id="friend-manual-load-wrap" class="manual-load-wrap" hidden>
           <label class="code-label" for="friend-import-code">Load turn link or code</label>
           <textarea id="friend-import-code" class="code-text" placeholder="Paste turn link or code from other player"></textarea>
-          <button id="friend-load-code-btn" type="button">Load Turn Link</button>
+          <div class="start-actions">
+            <button id="friend-load-manual-btn" type="button">Load Pasted Link</button>
+          </div>
         </div>
         <div class="start-actions friend-interstitial-actions">
           <button id="friend-copy-code-btn" type="button">Copy Turn Link</button>
+          <button id="friend-load-code-btn" type="button">Load Turn Link</button>
           <button id="friend-continue-btn" type="button" class="primary">Pass Device</button>
         </div>
         <div id="friend-interstitial-status" class="code-status"></div>

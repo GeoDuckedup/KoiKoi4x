@@ -350,6 +350,7 @@ const AI_STEP_CPU_PHASE1_PREVIEW_MS = 520;
 const AI_STEP_TARGET_MS = 340;
 const AI_STEP_DRAW_RESOLVE_MS = 360;
 const AI_STEP_DECISION_MS = 420;
+const TURN_REPLAY_STEP_MS = 900;
 const SAVE_CODE_PREFIX = "HKK3";
 const SAVE_CODE_VERSION = 3;
 const SAVE_CODE_PREFIX_VERSION = {
@@ -407,6 +408,18 @@ const state = {
   interstitial: {
     open: false,
     nextPlayerIndex: null,
+  },
+  activeTurnRecap: null,
+  lastTurnRecap: null,
+  turnReplay: {
+    active: false,
+    note: "",
+    timer: null,
+    key: null,
+  },
+  manualLoadFallback: {
+    start: false,
+    friend: false,
   },
   turnCheckpointReady: false,
   lastExportMeta: null,
@@ -516,15 +529,17 @@ function cacheUI() {
   ui.startModeCpuBtn = document.getElementById("start-mode-cpu-btn");
   ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
   ui.startLoadBtn = document.getElementById("start-load-btn");
+  ui.startLoadManualBtn = document.getElementById("start-load-manual-btn");
+  ui.startManualLoadWrap = document.getElementById("start-manual-load-wrap");
   ui.startImportCode = document.getElementById("start-import-code");
   ui.startMenuStatus = document.getElementById("start-menu-status");
   ui.friendInterstitial = document.getElementById("friend-interstitial");
   ui.friendInterstitialTitle = document.getElementById("friend-interstitial-title");
   ui.friendInterstitialText = document.getElementById("friend-interstitial-text");
-  ui.friendTurnCodeWrap = document.getElementById("friend-turn-code-wrap");
-  ui.friendTurnCode = document.getElementById("friend-turn-code");
+  ui.friendManualLoadWrap = document.getElementById("friend-manual-load-wrap");
   ui.friendImportCode = document.getElementById("friend-import-code");
   ui.friendLoadCodeBtn = document.getElementById("friend-load-code-btn");
+  ui.friendLoadManualBtn = document.getElementById("friend-load-manual-btn");
   ui.friendCopyCodeBtn = document.getElementById("friend-copy-code-btn");
   ui.friendContinueBtn = document.getElementById("friend-continue-btn");
   ui.friendInterstitialStatus = document.getElementById("friend-interstitial-status");
@@ -552,7 +567,9 @@ function bindUI() {
   ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
   ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
   ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
+  ui.startLoadManualBtn?.addEventListener("click", onStartLoadFromMenu);
   ui.friendLoadCodeBtn?.addEventListener("click", onFriendInterstitialLoadCode);
+  ui.friendLoadManualBtn?.addEventListener("click", onFriendInterstitialLoadCode);
   ui.friendCopyCodeBtn?.addEventListener("click", onFriendInterstitialCopyCode);
   ui.friendContinueBtn?.addEventListener("click", onFriendInterstitialContinue);
   ui.rulesToggle.addEventListener("click", () => {
@@ -581,6 +598,7 @@ function showStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = false;
   }
+  setStartManualLoadVisible(false);
   setFriendInterstitialOpen(false);
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
@@ -592,8 +610,23 @@ function hideStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = true;
   }
+  setStartManualLoadVisible(false);
   setFriendInterstitialOpen(false);
   setCodeStatus("", false, "start");
+}
+
+function setStartManualLoadVisible(open) {
+  state.manualLoadFallback.start = Boolean(open);
+  if (ui.startManualLoadWrap) {
+    ui.startManualLoadWrap.hidden = !state.manualLoadFallback.start;
+  }
+}
+
+function setFriendManualLoadVisible(open) {
+  state.manualLoadFallback.friend = Boolean(open);
+  if (ui.friendManualLoadWrap) {
+    ui.friendManualLoadWrap.hidden = !state.manualLoadFallback.friend;
+  }
 }
 
 function setCodePanelOpen(open) {
@@ -820,8 +853,7 @@ function onStartModeFriendFromMenu() {
 }
 
 function onStartLoadFromMenu() {
-  const raw = ui.startImportCode?.value || "";
-  loadCodeIntoGame(raw, "start");
+  tryLoadFromClipboardOrManual("start");
 }
 
 function setCodeStatus(message, isError, target = "panel") {
@@ -848,13 +880,59 @@ function setFriendInterstitialOpen(open, nextPlayerIndex = null) {
   };
   if (!shouldOpen) {
     setFriendInterstitialStatus("", false);
+    setFriendManualLoadVisible(false);
     if (ui.friendImportCode) ui.friendImportCode.value = "";
   }
 }
 
 function onFriendInterstitialLoadCode() {
-  const raw = ui.friendImportCode?.value || "";
-  loadCodeIntoGame(raw, "friend");
+  tryLoadFromClipboardOrManual("friend");
+}
+
+async function readClipboardTextSafe() {
+  if (!navigator.clipboard?.readText) {
+    throw new Error("Clipboard access unavailable");
+  }
+  const text = await navigator.clipboard.readText();
+  return String(text || "").trim();
+}
+
+async function tryLoadFromClipboardOrManual(target) {
+  const isStart = target === "start";
+  const inputEl = isStart ? ui.startImportCode : ui.friendImportCode;
+  const fallbackOpen = isStart ? state.manualLoadFallback.start : state.manualLoadFallback.friend;
+  const manualRaw = String(inputEl?.value || "").trim();
+
+  if (fallbackOpen && manualRaw) {
+    loadCodeIntoGame(manualRaw, target);
+    return;
+  }
+
+  try {
+    const clipboardText = await readClipboardTextSafe();
+    if (!clipboardText) {
+      throw new Error("Clipboard is empty");
+    }
+    const loaded = loadCodeIntoGame(clipboardText, target);
+    if (loaded) return;
+    if (isStart) {
+      setStartManualLoadVisible(true);
+    } else {
+      setFriendManualLoadVisible(true);
+    }
+    setCodeStatus("Clipboard content did not load. Paste a turn link or code below.", true, target);
+  } catch (err) {
+    if (isStart) {
+      setStartManualLoadVisible(true);
+    } else {
+      setFriendManualLoadVisible(true);
+    }
+    const fallbackMessage =
+      err && err.message === "Clipboard is empty"
+        ? "No clipboard link found. Paste a turn link or code below."
+        : "Clipboard unavailable. Paste a turn link or code below.";
+    setCodeStatus(fallbackMessage, true, target);
+  }
 }
 
 function prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {
@@ -877,17 +955,21 @@ async function onFriendInterstitialCopyCode() {
     setFriendInterstitialStatus(`Could not generate link: ${err.message}`, true);
     return;
   }
-  if (ui.friendTurnCode) {
-    ui.friendTurnCode.value = link;
-  }
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(link);
-    } else if (ui.friendTurnCode) {
-      ui.friendTurnCode.focus();
-      ui.friendTurnCode.select();
+    } else {
+      const temp = document.createElement("textarea");
+      temp.value = link;
+      temp.setAttribute("readonly", "true");
+      temp.style.position = "fixed";
+      temp.style.opacity = "0";
+      document.body.appendChild(temp);
+      temp.focus();
+      temp.select();
       document.execCommand("copy");
-      ui.friendTurnCode.setSelectionRange(0, 0);
+      temp.setSelectionRange(0, 0);
+      document.body.removeChild(temp);
     }
     setFriendInterstitialStatus("Turn link copied.", false);
   } catch (err) {
@@ -903,6 +985,7 @@ function onFriendInterstitialContinue() {
       : state.interstitial.nextPlayerIndex;
   state.viewerPlayerIndex = nextPlayerIndex;
   setFriendInterstitialOpen(false);
+  playTurnRecapForViewer();
   renderAll();
 }
 
@@ -915,24 +998,29 @@ function loadCodeIntoGame(rawInput, target = "panel") {
 
   try {
     const snapshot = decodeGameCode(normalized);
+    if (target === "friend" && snapshot.playMode !== "friend") {
+      throw new Error("This is not a friend turn link");
+    }
     validateFriendCodeSnapshotForImport(snapshot);
     applySnapshot(snapshot);
     hideStartMenu();
     setCodePanelOpen(false);
     if (snapshot.playMode === "friend" && snapshot.lastExportMeta) {
       const playerLabel = `Player ${snapshot.lastExportMeta.playerIndex + 1}`;
-      setCodeStatus(`Turn code loaded (${playerLabel}, move ${snapshot.lastExportMeta.turnNumber}).`, false, target);
+      setCodeStatus(`Turn link loaded (${playerLabel}, move ${snapshot.lastExportMeta.turnNumber}).`, false, target);
     } else {
-      setCodeStatus("Code loaded successfully.", false, target);
+      setCodeStatus("Link loaded successfully.", false, target);
     }
     if (target === "panel" && ui.importCode) {
       ui.importCode.value = "";
     }
     if (target === "start" && ui.startImportCode) {
       ui.startImportCode.value = "";
+      setStartManualLoadVisible(false);
     }
     if (target === "friend" && ui.friendImportCode) {
       ui.friendImportCode.value = "";
+      setFriendManualLoadVisible(false);
     }
     refreshExportCode();
     return true;
@@ -1050,6 +1138,7 @@ function buildSnapshot() {
           playerIndex: state.lastExportMeta.playerIndex,
         }
       : null,
+    lastTurnRecap: state.lastTurnRecap ? { ...state.lastTurnRecap } : null,
     aiProfile: state.aiProfile,
     gameNumber: state.gameNumber,
     maxGames: state.maxGames,
@@ -1102,9 +1191,9 @@ function serializePendingSelection(pending) {
       options: [...pending.options],
     };
   }
-  if (pending.type === "drawMatch") {
+  if (pending.type === "drawMatch" || pending.type === "drawPlace") {
     return {
-      type: "drawMatch",
+      type: pending.type,
       playerIndex: pending.playerIndex,
       drawnCardId: pending.drawnCard?.id || null,
       moveNumber: pending.moveNumber,
@@ -1157,6 +1246,9 @@ function validateSnapshot(snapshot) {
     }
     if (snapshot.lastExportMeta !== null && snapshot.lastExportMeta !== undefined) {
       validateLastExportMetaSnapshot(snapshot.lastExportMeta);
+    }
+    if (snapshot.lastTurnRecap !== null && snapshot.lastTurnRecap !== undefined) {
+      validateTurnRecapSnapshot(snapshot.lastTurnRecap);
     }
   }
   if (!Array.isArray(snapshot.players) || snapshot.players.length !== 2) {
@@ -1269,6 +1361,29 @@ function validateLastExportMetaSnapshot(meta) {
   asPlayerIndex(meta.playerIndex, "lastExportMeta.playerIndex");
 }
 
+function validateTurnRecapSnapshot(recap) {
+  if (!recap || typeof recap !== "object") {
+    throw new Error("lastTurnRecap must be an object");
+  }
+  asPlayerIndex(recap.actorIndex, "lastTurnRecap.actorIndex");
+  asInt(recap.moveNumber, "lastTurnRecap.moveNumber");
+  asInt(recap.tableMultiplierStart, "lastTurnRecap.tableMultiplierStart");
+  asInt(recap.tableMultiplierEnd, "lastTurnRecap.tableMultiplierEnd");
+  ensureCardId(recap.playedCardId, "lastTurnRecap.playedCardId");
+  if (recap.drawnCardId !== null && recap.drawnCardId !== undefined) {
+    ensureCardId(recap.drawnCardId, "lastTurnRecap.drawnCardId");
+  }
+  if (recap.handAction && typeof recap.handAction !== "object") {
+    throw new Error("lastTurnRecap.handAction must be an object");
+  }
+  if (recap.drawAction && typeof recap.drawAction !== "object") {
+    throw new Error("lastTurnRecap.drawAction must be an object");
+  }
+  if (recap.decision && typeof recap.decision !== "object") {
+    throw new Error("lastTurnRecap.decision must be an object");
+  }
+}
+
 function validatePendingSelectionSnapshot(pending) {
   if (!pending || typeof pending !== "object") {
     throw new Error("pendingSelection must be an object");
@@ -1282,7 +1397,7 @@ function validatePendingSelectionSnapshot(pending) {
     pending.options.forEach((id, idx) => ensureCardId(id, `pendingSelection.options[${idx}]`));
     return;
   }
-  if (pending.type === "drawMatch") {
+  if (pending.type === "drawMatch" || pending.type === "drawPlace") {
     asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex");
     ensureCardId(pending.drawnCardId, "pendingSelection.drawnCardId");
     asInt(pending.moveNumber, "pendingSelection.moveNumber");
@@ -1335,6 +1450,9 @@ function applySnapshot(snapshot) {
   state.interstitial = normalizeInterstitial(snapshot.interstitial);
   state.turnCheckpointReady = Boolean(snapshot.turnCheckpointReady);
   state.lastExportMeta = normalizeLastExportMeta(snapshot.lastExportMeta);
+  state.lastTurnRecap = normalizeTurnRecap(snapshot.lastTurnRecap);
+  state.activeTurnRecap = null;
+  stopTurnReplay(false);
   state.tableMultiplier = asInt(snapshot.tableMultiplier, "tableMultiplier");
   state.lastKoiCaller = asNullablePlayerIndex(snapshot.lastKoiCaller, "lastKoiCaller");
   state.firstYakuPlayer = asNullablePlayerIndex(snapshot.firstYakuPlayer, "firstYakuPlayer");
@@ -1385,6 +1503,11 @@ function applySnapshot(snapshot) {
     }
   }
 
+  if (state.playMode === "friend") {
+    state.players[0].isHuman = true;
+    state.players[1].isHuman = true;
+  }
+
   state.field = cardIdsToCards(snapshot.field, "field");
   state.drawPile = cardIdsToCards(snapshot.drawPile, "drawPile");
   state.moveCounts = [
@@ -1402,6 +1525,7 @@ function applySnapshot(snapshot) {
   state.aiPreview = hydrateAiPreview(snapshot.aiPreview);
   state.cpuPhase1PreviewCardId = snapshot.cpuPhase1PreviewCardId || null;
 
+  let replayAfterImport = false;
   if (state.playMode === "friend" && state.interstitial.open) {
     const nextPlayerIndex =
       state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
@@ -1409,11 +1533,15 @@ function applySnapshot(snapshot) {
         : state.interstitial.nextPlayerIndex;
     state.viewerPlayerIndex = nextPlayerIndex;
     setFriendInterstitialOpen(false);
+    replayAfterImport = true;
   }
 
   validateHydratedStateCardOwnership();
   state.autoFocusTargetKey = null;
   renderAll();
+  if (replayAfterImport) {
+    playTurnRecapForViewer();
+  }
   resumeLoadedStateFlow();
 }
 
@@ -1427,9 +1555,9 @@ function hydratePendingSelection(pending) {
       options: pending.options.map(String),
     };
   }
-  if (pending.type === "drawMatch") {
+  if (pending.type === "drawMatch" || pending.type === "drawPlace") {
     return {
-      type: "drawMatch",
+      type: pending.type,
       playerIndex: asPlayerIndex(pending.playerIndex, "pendingSelection.playerIndex"),
       drawnCard: cardByIdOrThrow(pending.drawnCardId, "pendingSelection.drawnCardId"),
       moveNumber: asInt(pending.moveNumber, "pendingSelection.moveNumber"),
@@ -1504,6 +1632,21 @@ function normalizeLastExportMeta(meta) {
   };
 }
 
+function normalizeTurnRecap(recap) {
+  if (!recap || typeof recap !== "object") return null;
+  return {
+    actorIndex: asPlayerIndex(recap.actorIndex, "lastTurnRecap.actorIndex"),
+    moveNumber: asInt(recap.moveNumber, "lastTurnRecap.moveNumber"),
+    tableMultiplierStart: asInt(recap.tableMultiplierStart, "lastTurnRecap.tableMultiplierStart"),
+    tableMultiplierEnd: asInt(recap.tableMultiplierEnd, "lastTurnRecap.tableMultiplierEnd"),
+    playedCardId: String(recap.playedCardId),
+    handAction: recap.handAction && typeof recap.handAction === "object" ? { ...recap.handAction } : null,
+    drawnCardId: recap.drawnCardId ? String(recap.drawnCardId) : null,
+    drawAction: recap.drawAction && typeof recap.drawAction === "object" ? { ...recap.drawAction } : null,
+    decision: recap.decision && typeof recap.decision === "object" ? { ...recap.decision } : null,
+  };
+}
+
 function validateRoundHistoryEntry(entry, idx, maxGames) {
   if (!entry || typeof entry !== "object") {
     throw new Error(`roundHistory[${idx}] must be an object`);
@@ -1549,7 +1692,7 @@ function validateHydratedStateCardOwnership() {
     player.hand.forEach((card) => claim(card.id, `players[${playerIndex}].hand`));
     player.captured.forEach((card) => claim(card.id, `players[${playerIndex}].captured`));
   });
-  if (state.pendingSelection?.type === "drawMatch") {
+  if (state.pendingSelection?.type === "drawMatch" || state.pendingSelection?.type === "drawPlace") {
     claim(state.pendingSelection.drawnCard.id, "pendingSelection.drawnCard");
   }
   if (state.awaitingDeckFlip) {
@@ -1562,9 +1705,18 @@ function validateHydratedStateCardOwnership() {
 
   if (state.pendingSelection) {
     const optionSet = new Set(state.field.map((card) => card.id));
-    for (const optionId of state.pendingSelection.options) {
-      if (!optionSet.has(optionId)) {
-        throw new Error("pendingSelection references a field card that is not on the field");
+    if (state.pendingSelection.type === "drawPlace") {
+      if (
+        state.pendingSelection.options.length !== 1 ||
+        state.pendingSelection.options[0] !== state.pendingSelection.drawnCard.id
+      ) {
+        throw new Error("drawPlace pendingSelection options must reference the drawn card preview");
+      }
+    } else {
+      for (const optionId of state.pendingSelection.options) {
+        if (!optionSet.has(optionId)) {
+          throw new Error("pendingSelection references a field card that is not on the field");
+        }
       }
     }
     if (state.pendingSelection.type === "handMatch" || state.pendingSelection.type === "handPlace") {
@@ -1578,32 +1730,37 @@ function validateHydratedStateCardOwnership() {
 
 function resumeLoadedStateFlow() {
   if (state.roundOver || state.matchOver) return;
+  const cpuPlayerIndex = getCpuPlayerIndex();
+  if (cpuPlayerIndex < 0) return;
+
   if (state.awaitingDecision) {
-    if (state.awaitingDecision.playerIndex === 1) {
-      scheduleAIStep(AI_STEP_DECISION_MS, resolveCpuPendingDecision);
+    if (state.awaitingDecision.playerIndex === cpuPlayerIndex) {
+      scheduleAIStep(AI_STEP_DECISION_MS, () => resolveCpuPendingDecision(cpuPlayerIndex));
     }
     return;
   }
 
   if (state.awaitingDeckFlip) {
-    if (state.awaitingDeckFlip.playerIndex === 1) {
-      resumeCpuDeckFlipFlow(state.awaitingDeckFlip);
+    if (state.awaitingDeckFlip.playerIndex === cpuPlayerIndex) {
+      resumeCpuDeckFlipFlow(state.awaitingDeckFlip, cpuPlayerIndex);
     }
     return;
   }
 
-  if (state.currentPlayer === 1) {
+  if (state.currentPlayer === cpuPlayerIndex) {
     queueAITurn(420);
   }
 }
 
-function resolveCpuPendingDecision() {
+function resolveCpuPendingDecision(cpuPlayerIndex = getCpuPlayerIndex()) {
   if (!state.awaitingDecision || state.awaitingDecision.kind !== "stopOrKoi") return;
-  if (state.awaitingDecision.playerIndex !== 1) return;
+  if (cpuPlayerIndex < 0) return;
+  if (state.awaitingDecision.playerIndex !== cpuPlayerIndex) return;
   const decision = state.awaitingDecision;
   if (state.roundOver || state.currentPlayer !== decision.playerIndex) return;
   const action = chooseAIDecision(decision);
   if (action === "pass" && decision.canPass) {
+    recordTurnRecapDecision("pass", state.tableMultiplier, decision.passMultiplier);
     logPlayerMove(
       decision.playerIndex,
       decision.moveNumber,
@@ -1615,34 +1772,35 @@ function resolveCpuPendingDecision() {
   applyKoiAndContinue(decision);
 }
 
-function resumeCpuDeckFlipFlow(flip) {
-  if (!flip || flip.playerIndex !== 1) return;
+function resumeCpuDeckFlipFlow(flip, cpuPlayerIndex = getCpuPlayerIndex()) {
+  if (cpuPlayerIndex < 0) return;
+  if (!flip || flip.playerIndex !== cpuPlayerIndex) return;
   const drawn = flip.drawnCard;
   if (!drawn) return;
 
   if (flip.revealed) {
     scheduleAIStep(CPU_DRAW_REVEAL_LINGER_MS, () => {
       if (!state.awaitingDeckFlip) return;
-      if (state.awaitingDeckFlip.playerIndex !== 1 || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
-      if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision || state.pendingSelection) return;
+      if (state.awaitingDeckFlip.playerIndex !== cpuPlayerIndex || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
+      if (state.roundOver || state.currentPlayer !== cpuPlayerIndex || state.awaitingDecision || state.pendingSelection) return;
       const moveNumber = state.awaitingDeckFlip.moveNumber;
       state.awaitingDeckFlip = null;
-      resolveRevealedDrawForCpu(1, moveNumber, drawn);
+      resolveRevealedDrawForCpu(cpuPlayerIndex, moveNumber, drawn);
     });
     return;
   }
 
   scheduleAIStep(CPU_DECK_FLIP_DELAY_MS, () => {
     if (!state.awaitingDeckFlip) return;
-    if (state.awaitingDeckFlip.playerIndex !== 1 || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
-    if (state.roundOver || state.currentPlayer !== 1) return;
+    if (state.awaitingDeckFlip.playerIndex !== cpuPlayerIndex || state.awaitingDeckFlip.drawnCard.id !== drawn.id) return;
+    if (state.roundOver || state.currentPlayer !== cpuPlayerIndex) return;
     state.awaitingDeckFlip.revealed = true;
     state.drawPreview = {
       cardId: drawn.id,
       text: `Pulled ${drawn.name}.`,
     };
     renderAll();
-    resumeCpuDeckFlipFlow(state.awaitingDeckFlip);
+    resumeCpuDeckFlipFlow(state.awaitingDeckFlip, cpuPlayerIndex);
   });
 }
 
@@ -1737,6 +1895,170 @@ function pushActionLog(prefix, text) {
   }
 }
 
+function startTurnRecap(playerIndex, moveNumber, playedCardId) {
+  state.activeTurnRecap = {
+    actorIndex: playerIndex,
+    moveNumber,
+    tableMultiplierStart: state.tableMultiplier,
+    tableMultiplierEnd: state.tableMultiplier,
+    playedCardId,
+    handAction: null,
+    drawnCardId: null,
+    drawAction: null,
+    decision: null,
+  };
+}
+
+function recordTurnRecapHandAction(action) {
+  if (!state.activeTurnRecap) return;
+  state.activeTurnRecap.handAction = action ? { ...action } : null;
+}
+
+function recordTurnRecapDraw(drawnCardId, action) {
+  if (!state.activeTurnRecap) return;
+  state.activeTurnRecap.drawnCardId = drawnCardId || null;
+  state.activeTurnRecap.drawAction = action ? { ...action } : null;
+}
+
+function recordTurnRecapDecision(kind, multiplierBefore, multiplierAfter) {
+  if (!state.activeTurnRecap) return;
+  state.activeTurnRecap.decision = {
+    kind,
+    multiplierBefore,
+    multiplierAfter,
+  };
+  state.activeTurnRecap.tableMultiplierEnd = multiplierAfter;
+}
+
+function commitTurnRecapForHandoff(playerIndex, moveNumber) {
+  const recap = state.activeTurnRecap;
+  if (!recap) {
+    state.lastTurnRecap = null;
+    return;
+  }
+  if (recap.actorIndex !== playerIndex || recap.moveNumber !== moveNumber) {
+    state.lastTurnRecap = null;
+    state.activeTurnRecap = null;
+    return;
+  }
+  recap.tableMultiplierEnd = state.tableMultiplier;
+  state.lastTurnRecap = { ...recap };
+  state.activeTurnRecap = null;
+}
+
+function clearTurnRecapState() {
+  state.activeTurnRecap = null;
+  state.lastTurnRecap = null;
+  state.turnReplay.key = null;
+}
+
+function describeRecapStep(step) {
+  if (!step) return "";
+  const actorName = state.players[step.actorIndex]?.name || `Player ${step.actorIndex + 1}`;
+  const played = step.playedCardId ? CARD_BY_ID.get(step.playedCardId) : null;
+  const drawn = step.drawnCardId ? CARD_BY_ID.get(step.drawnCardId) : null;
+  const parts = [];
+  if (played) {
+    parts.push(`${actorName} played ${played.name}.`);
+  }
+  if (step.handAction?.kind === "capture") {
+    const fieldCard = step.handAction.fieldCardId ? CARD_BY_ID.get(step.handAction.fieldCardId) : null;
+    parts.push(fieldCard ? `Captured ${fieldCard.name}.` : "Captured a matching card.");
+  } else if (step.handAction?.kind === "sweep") {
+    parts.push("Captured all four matching month cards.");
+  } else if (step.handAction?.kind === "place") {
+    parts.push("No match, landed on field.");
+  }
+  if (drawn) {
+    parts.push(`Drew ${drawn.name}.`);
+  }
+  if (step.drawAction?.kind === "capture") {
+    const fieldCard = step.drawAction.fieldCardId ? CARD_BY_ID.get(step.drawAction.fieldCardId) : null;
+    parts.push(fieldCard ? `Matched ${fieldCard.name}.` : "Matched a field card.");
+  } else if (step.drawAction?.kind === "sweep") {
+    parts.push("Draw completed a 4-card sweep.");
+  } else if (step.drawAction?.kind === "place") {
+    parts.push("Draw had no match.");
+  } else if (step.drawAction?.kind === "deck-empty") {
+    parts.push("Deck was empty.");
+  }
+  if (step.decision?.kind === "pass") {
+    parts.push(`Passed at ${step.decision.multiplierAfter}x.`);
+  } else if (step.decision?.kind === "koi") {
+    parts.push(`Called Koi-Koi to ${step.decision.multiplierAfter}x.`);
+  }
+  return parts.join(" ");
+}
+
+function stopTurnReplay(resetVisual = true) {
+  if (state.turnReplay.timer) {
+    clearTimeout(state.turnReplay.timer);
+  }
+  state.turnReplay.timer = null;
+  state.turnReplay.active = false;
+  state.turnReplay.note = "";
+  if (resetVisual) {
+    state.drawPreview = {
+      cardId: null,
+      text: "Waiting for draw.",
+    };
+  }
+}
+
+function playTurnRecapForViewer() {
+  if (!isFriendMode()) return;
+  const recap = state.lastTurnRecap;
+  if (!recap) return;
+  const viewer = getViewerPlayerIndex();
+  if (viewer === recap.actorIndex) return;
+  const key = `${recap.actorIndex}:${recap.moveNumber}:${state.gameNumber}`;
+  if (state.turnReplay.key === key) return;
+
+  stopTurnReplay(false);
+  state.turnReplay.key = key;
+  state.turnReplay.active = true;
+
+  const steps = [];
+  const headline = describeRecapStep(recap);
+  if (headline) {
+    steps.push({
+      note: headline,
+      cardId: recap.playedCardId || null,
+    });
+  }
+  if (recap.drawnCardId) {
+    steps.push({
+      note: `${state.players[recap.actorIndex]?.name || `Player ${recap.actorIndex + 1}`} finished the turn.`,
+      cardId: recap.drawnCardId,
+    });
+  }
+  steps.push({
+    note: `Your turn.`,
+    cardId: null,
+  });
+
+  let idx = 0;
+  const runStep = () => {
+    if (!state.turnReplay.active) return;
+    const step = steps[idx];
+    if (!step) {
+      stopTurnReplay(true);
+      renderAll();
+      return;
+    }
+    state.turnReplay.note = step.note;
+    state.drawPreview = {
+      cardId: step.cardId,
+      text: step.note,
+    };
+    renderAll();
+    idx += 1;
+    state.turnReplay.timer = setTimeout(runStep, TURN_REPLAY_STEP_MS);
+  };
+
+  runStep();
+}
+
 function startNewMatch(options = {}) {
   hideStartMenu();
   setCodePanelOpen(false);
@@ -1748,6 +2070,7 @@ function startNewMatch(options = {}) {
   const playMode = playModeSource === "friend" ? "friend" : "cpu";
   const friendFlow = normalizeFriendFlow(friendFlowSource);
   clearAITask();
+  stopTurnReplay(true);
   state.playMode = playMode;
   state.friendFlow = friendFlow;
   if (playMode === "friend") {
@@ -1766,6 +2089,7 @@ function startNewMatch(options = {}) {
   };
   state.turnCheckpointReady = false;
   state.lastExportMeta = null;
+  clearTurnRecapState();
   state.gameNumber = 1;
   state.dealer = Math.random() < 0.5 ? 0 : 1;
   state.currentPlayer = state.dealer;
@@ -1793,6 +2117,7 @@ function startRound() {
   window.scrollTo({ top: 0, behavior: "smooth" });
   clearAITask();
   clearDrawRevealTask();
+  stopTurnReplay(true);
   resetDrawPreviewFx();
   state.actionLog = [];
   state.moveCounts = [0, 0];
@@ -1807,6 +2132,7 @@ function startRound() {
   state.tableMultiplier = 1;
   state.roundSpecialTwoXPlayer = state.nextRoundSpecialTwoXPlayer;
   state.nextRoundSpecialTwoXPlayer = null;
+  clearTurnRecapState();
   state.drawPreview = {
     cardId: null,
     text: "Waiting for draw.",
@@ -1900,6 +2226,13 @@ function isFriendMode() {
   return state.playMode === "friend";
 }
 
+function getCpuPlayerIndex() {
+  for (let i = 0; i < state.players.length; i += 1) {
+    if (!state.players[i].isHuman) return i;
+  }
+  return -1;
+}
+
 function isFriendCodeMode() {
   return isFriendMode();
 }
@@ -1968,6 +2301,7 @@ function canRevealBottomHand() {
 
 function getInteractiveHumanPlayerIndex() {
   if (state.roundOver || state.matchOver) return null;
+  if (state.turnReplay.active) return null;
   if (state.interstitial?.open) return null;
   const current = state.players[state.currentPlayer];
   if (!current || !current.isHuman) return null;
@@ -2019,7 +2353,7 @@ function onPlayerHandClick(event) {
   if (!card) return;
 
   if (pending) {
-    if (pending.type === "drawMatch") return;
+    if (pending.type === "drawMatch" || pending.type === "drawPlace") return;
     if (handPreviewPending) {
       if (pending.cardId === cardId) {
         if (pending.type === "handPlace" || pending.type === "handMatch") {
@@ -2105,6 +2439,10 @@ function onFieldClick(event) {
     executePlayFromHand(pending.playerIndex, pending.cardId, selectedId);
   } else if (pending.type === "drawMatch") {
     resolveDrawMatch(pending.playerIndex, pending.drawnCard, selectedId, pending.moveNumber);
+  } else if (pending.type === "drawPlace") {
+    if (selectedId === pending.drawnCard.id) {
+      resolveDrawPlace(pending.playerIndex, pending.drawnCard, pending.moveNumber);
+    }
   }
 }
 
@@ -2146,10 +2484,11 @@ function beginPendingSelection(pending, logMessage, options = {}) {
 function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
   state.pendingSelection = null;
   state.aiPreview = null;
-  if (playerIndex === 1) {
+  if (playerIndex === getCpuPlayerIndex()) {
     state.cpuPhase1PreviewCardId = null;
   }
   const moveNumber = nextMoveNumber(playerIndex);
+  startTurnRecap(playerIndex, moveNumber, cardId);
 
   const player = state.players[playerIndex];
   const cardIndex = player.hand.findIndex((card) => card.id === cardId);
@@ -2161,24 +2500,29 @@ function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
 
   if (matches.length === 3) {
     captured = [card, ...takeAllMonthMatchesFromField(card.month)];
+    recordTurnRecapHandAction({ kind: "sweep" });
     state.message = `${player.name} captured all four ${describeMonth(card.month)} cards.`;
   } else if (forcedFieldId) {
     const fieldIndex = state.field.findIndex((entry) => entry.id === forcedFieldId);
     if (fieldIndex !== -1) {
       const fieldCard = state.field.splice(fieldIndex, 1)[0];
       captured = [card, fieldCard];
+      recordTurnRecapHandAction({ kind: "capture", fieldCardId: fieldCard.id });
       state.message = `${player.name} captured ${fieldCard.name}.`;
     } else {
       state.field.push(card);
+      recordTurnRecapHandAction({ kind: "place" });
       state.message = `${player.name} placed ${card.name}.`;
     }
   } else if (matches.length === 1) {
     const fieldIndex = state.field.findIndex((entry) => entry.id === matches[0].id);
     const fieldCard = state.field.splice(fieldIndex, 1)[0];
     captured = [card, fieldCard];
+    recordTurnRecapHandAction({ kind: "capture", fieldCardId: fieldCard.id });
     state.message = `${player.name} captured ${fieldCard.name}.`;
   } else {
     state.field.push(card);
+    recordTurnRecapHandAction({ kind: "place" });
     state.message = `${player.name} placed ${card.name}.`;
   }
 
@@ -2197,6 +2541,7 @@ function executePlayFromHand(playerIndex, cardId, forcedFieldId) {
 function processDrawStep(playerIndex, moveNumber) {
   if (state.drawPile.length === 0) {
     state.drawPreview = { cardId: null, text: "Deck is empty." };
+    recordTurnRecapDraw(null, { kind: "deck-empty" });
     finalizeTurn(playerIndex, moveNumber);
     return;
   }
@@ -2257,13 +2602,21 @@ function resolveRevealedDrawForPlayer(playerIndex, moveNumber, drawn) {
   const matches = getFieldMatches(drawn.month);
 
   if (matches.length === 0) {
-    state.field.push(drawn);
-    state.message += ` Flip ${drawn.name}, no match.`;
     state.drawPreview = {
       cardId: drawn.id,
-      text: `Pulled ${drawn.name}. No match, landed on field.`,
+      text: `Pulled ${drawn.name}. Tap preview field card to place.`,
     };
-    finalizeTurn(playerIndex, moveNumber);
+    beginPendingSelection(
+      {
+        type: "drawPlace",
+        playerIndex,
+        drawnCard: drawn,
+        moveNumber,
+        options: [drawn.id],
+      },
+      `${state.message} Flip ${drawn.name}. Tap preview field card to place.`,
+      { silent: true }
+    );
     return;
   }
 
@@ -2299,6 +2652,7 @@ function resolveRevealedDrawForCpu(playerIndex, moveNumber, drawn) {
   const matches = getFieldMatches(drawn.month);
   if (matches.length === 0) {
     state.field.push(drawn);
+    recordTurnRecapDraw(drawn.id, { kind: "place" });
     state.message += ` Flip ${drawn.name}, no match.`;
     state.drawPreview = {
       cardId: drawn.id,
@@ -2318,6 +2672,7 @@ function resolveDrawMatch(playerIndex, drawnCard, fieldCardId, moveNumber) {
   if (matches.length === 3) {
     const captured = [drawnCard, ...takeAllMonthMatchesFromField(drawnCard.month)];
     addCapturedCards(playerIndex, captured);
+    recordTurnRecapDraw(drawnCard.id, { kind: "sweep" });
     state.message += ` Captured all four ${describeMonth(drawnCard.month)} cards.`;
     state.drawPreview = {
       cardId: drawnCard.id,
@@ -2331,6 +2686,7 @@ function resolveDrawMatch(playerIndex, drawnCard, fieldCardId, moveNumber) {
   if (fieldIndex !== -1) {
     const fieldCard = state.field.splice(fieldIndex, 1)[0];
     addCapturedCards(playerIndex, [drawnCard, fieldCard]);
+    recordTurnRecapDraw(drawnCard.id, { kind: "capture", fieldCardId: fieldCard.id });
     state.message += ` Capture ${fieldCard.name}.`;
     state.drawPreview = {
       cardId: drawnCard.id,
@@ -2338,6 +2694,7 @@ function resolveDrawMatch(playerIndex, drawnCard, fieldCardId, moveNumber) {
     };
   } else {
     state.field.push(drawnCard);
+    recordTurnRecapDraw(drawnCard.id, { kind: "place" });
     state.message += ` No capture.`;
     state.drawPreview = {
       cardId: drawnCard.id,
@@ -2345,6 +2702,18 @@ function resolveDrawMatch(playerIndex, drawnCard, fieldCardId, moveNumber) {
     };
   }
 
+  finalizeTurn(playerIndex, moveNumber);
+}
+
+function resolveDrawPlace(playerIndex, drawnCard, moveNumber) {
+  state.pendingSelection = null;
+  state.field.push(drawnCard);
+  recordTurnRecapDraw(drawnCard.id, { kind: "place" });
+  state.message += ` Flip ${drawnCard.name}, no match.`;
+  state.drawPreview = {
+    cardId: drawnCard.id,
+    text: `Pulled ${drawnCard.name}. No match, landed on field.`,
+  };
   finalizeTurn(playerIndex, moveNumber);
 }
 
@@ -2415,6 +2784,7 @@ function previewAndResolveCpuDrawMatch(playerIndex, moveNumber, drawnCard, match
     if (matches.length === 3) {
       const captured = [drawnCard, ...takeAllMonthMatchesFromField(drawnCard.month)];
       addCapturedCards(playerIndex, captured);
+      recordTurnRecapDraw(drawnCard.id, { kind: "sweep" });
       state.message += ` Flip ${drawnCard.name}, captured all four ${describeMonth(drawnCard.month)} cards.`;
       state.drawPreview = {
         cardId: drawnCard.id,
@@ -2428,6 +2798,7 @@ function previewAndResolveCpuDrawMatch(playerIndex, moveNumber, drawnCard, match
     if (fieldIndex !== -1) {
       const fieldCard = state.field.splice(fieldIndex, 1)[0];
       addCapturedCards(playerIndex, [drawnCard, fieldCard]);
+      recordTurnRecapDraw(drawnCard.id, { kind: "capture", fieldCardId: fieldCard.id });
       state.message += ` Flip ${drawnCard.name}, capture ${fieldCard.name}.`;
       state.drawPreview = {
         cardId: drawnCard.id,
@@ -2435,6 +2806,7 @@ function previewAndResolveCpuDrawMatch(playerIndex, moveNumber, drawnCard, match
       };
     } else {
       state.field.push(drawnCard);
+      recordTurnRecapDraw(drawnCard.id, { kind: "place" });
       state.message += ` Flip ${drawnCard.name}, no match.`;
       state.drawPreview = {
         cardId: drawnCard.id,
@@ -2789,6 +3161,7 @@ function chooseAIDecision(decision) {
 
 function applyKoiAndContinue(decision) {
   state.awaitingDecision = null;
+  recordTurnRecapDecision("koi", state.tableMultiplier, decision.koiMultiplier);
   state.lastKoiCaller = decision.playerIndex;
   state.tableMultiplier = decision.koiMultiplier;
 
@@ -2816,6 +3189,7 @@ function applyKoiAndContinue(decision) {
 function moveToNextPlayer() {
   const previousPlayerIndex = state.currentPlayer;
   const previousTurnNumber = state.moveCounts[previousPlayerIndex];
+  commitTurnRecapForHandoff(previousPlayerIndex, previousTurnNumber);
   state.currentPlayer = state.currentPlayer === 0 ? 1 : 0;
   state.message = `${state.players[state.currentPlayer].name} to play. Table ${state.tableMultiplier}x.`;
   addSystemLog(state.message);
@@ -2859,6 +3233,7 @@ function endRoundDraw() {
   state.nextRoundSpecialTwoXPlayer = null;
   state.previousRoundWinner = null;
   state.previousRoundMultiplier = null;
+  state.activeTurnRecap = null;
   state.roundHistory.push({
     month: state.gameNumber,
     you: 0,
@@ -2891,6 +3266,7 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
   state.awaitingDecision = null;
   state.lastKoiCaller = null;
   state.firstYakuPlayer = null;
+  state.activeTurnRecap = null;
 
   const winner = state.players[winnerIndex];
   const loserIndex = winnerIndex === 0 ? 1 : 0;
@@ -2950,29 +3326,32 @@ function onNextGame() {
 }
 
 function queueAITurn(delayMs) {
+  const cpuPlayerIndex = getCpuPlayerIndex();
+  if (cpuPlayerIndex < 0) return;
   clearAITask();
   scheduleAIStep(delayMs, () => {
-    if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
-    performAITurn();
+    if (state.roundOver || state.currentPlayer !== cpuPlayerIndex || state.awaitingDecision) return;
+    performAITurn(cpuPlayerIndex);
   });
 }
 
-function performAITurn() {
-  const choice = chooseAICard(1);
+function performAITurn(playerIndex = getCpuPlayerIndex()) {
+  if (playerIndex < 0) return;
+  const choice = chooseAICard(playerIndex);
   if (!choice || !choice.card) return;
-  state.message = "CPU is choosing a card.";
+  state.message = `${state.players[playerIndex].name} is choosing a card.`;
   addSystemLog(state.message);
   renderAll();
 
   scheduleAIStep(AI_STEP_THINK_MS, () => {
-    if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+    if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision) return;
 
     state.cpuPhase1PreviewCardId = choice.card.id;
-    addSystemLog(`CPU selected ${choice.card.name}.`);
+    addSystemLog(`${state.players[playerIndex].name} selected ${choice.card.name}.`);
     renderAll();
 
     scheduleAIStep(AI_STEP_CPU_PHASE1_PREVIEW_MS, () => {
-      if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+      if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision) return;
 
       const matches = getFieldMatches(choice.card.month);
       if (matches.length > 0) {
@@ -2995,14 +3374,14 @@ function performAITurn() {
         addSystemLog(aiPrompt);
         renderAll();
         scheduleAIStep(AI_STEP_TARGET_MS, () => {
-          if (state.roundOver || state.currentPlayer !== 1 || state.awaitingDecision) return;
+          if (state.roundOver || state.currentPlayer !== playerIndex || state.awaitingDecision) return;
           state.aiPreview = null;
-          executePlayFromHand(1, choice.card.id, choice.targetFieldId || null);
+          executePlayFromHand(playerIndex, choice.card.id, choice.targetFieldId || null);
         });
         return;
       }
 
-      executePlayFromHand(1, choice.card.id, null);
+      executePlayFromHand(playerIndex, choice.card.id, null);
     });
   });
 }
@@ -3338,6 +3717,7 @@ function computeTurnCheckpointReady() {
   if (state.matchOver || state.roundOver) return false;
   if (state.pendingSelection || state.awaitingDeckFlip || state.awaitingDecision) return false;
   if (state.aiPreview || state.cpuPhase1PreviewCardId) return false;
+  if (state.turnReplay.active) return false;
   if (isFriendMode()) return Boolean(state.interstitial?.open);
   return true;
 }
@@ -3368,13 +3748,6 @@ function renderFriendInterstitial() {
   if (ui.friendContinueBtn) {
     ui.friendContinueBtn.textContent = `${nextName} Ready`;
   }
-  if (ui.friendTurnCode) {
-    try {
-      ui.friendTurnCode.value = buildShareLinkFromCode(encodeStateToCode());
-    } catch (_err) {
-      ui.friendTurnCode.value = "";
-    }
-  }
   if (ui.friendImportCode) {
     ui.friendImportCode.placeholder = "Paste turn link or code from other player";
   }
@@ -3383,17 +3756,15 @@ function renderFriendInterstitial() {
   }
   if (ui.friendLoadCodeBtn) {
     ui.friendLoadCodeBtn.disabled = false;
+    ui.friendLoadCodeBtn.textContent = "Load Turn Link";
   }
-  if (ui.friendTurnCodeWrap) {
-    ui.friendTurnCodeWrap.hidden = false;
+  if (ui.friendManualLoadWrap) {
+    ui.friendManualLoadWrap.hidden = !state.manualLoadFallback.friend;
   }
   if (ui.friendCopyCodeBtn) {
     ui.friendCopyCodeBtn.hidden = false;
   }
   if (!isFriendTurnExportWindow()) {
-    if (ui.friendTurnCode) {
-      ui.friendTurnCode.value = "";
-    }
     if (ui.friendCopyCodeBtn) {
       ui.friendCopyCodeBtn.disabled = true;
     }
@@ -3404,6 +3775,7 @@ function renderFriendInterstitial() {
 }
 
 function getActiveActionFocusKey() {
+  if (state.turnReplay.active) return "draw-preview";
   const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
   const pending =
     state.pendingSelection && interactivePlayerIndex !== null && state.pendingSelection.playerIndex === interactivePlayerIndex
@@ -3702,8 +4074,10 @@ function renderField() {
   const inChoiceMode = Boolean(activeOptions && activeOptions.length);
   const humanSelectable = Boolean(pending);
   const previewPlacementCard =
-    pending && pending.type === "handPlace"
-      ? state.players[pending.playerIndex].hand.find((entry) => entry.id === pending.cardId) || CARD_BY_ID.get(pending.cardId) || null
+    pending && (pending.type === "handPlace" || pending.type === "drawPlace")
+      ? pending.type === "handPlace"
+        ? state.players[pending.playerIndex].hand.find((entry) => entry.id === pending.cardId) || CARD_BY_ID.get(pending.cardId) || null
+        : pending.drawnCard || null
       : null;
   const fieldEntries = state.field.map((card) => ({ card, isPreviewPlacement: false }));
   if (previewPlacementCard) {
@@ -3849,6 +4223,9 @@ function getChoicePromptText(pending) {
   if (pending.type === "drawMatch") {
     return `Select 1 highlighted field card to pair with drawn ${pending.drawnCard.name}.`;
   }
+  if (pending.type === "drawPlace") {
+    return `No match for drawn ${pending.drawnCard.name}. Tap preview field card to place.`;
+  }
   return "Select 1 highlighted field card.";
 }
 
@@ -3888,7 +4265,10 @@ function renderChoiceMode() {
   if (ui.handLockNote) {
     let noteText = "";
     let activeNote = false;
-    if (pending) {
+    if (state.turnReplay.active) {
+      noteText = state.turnReplay.note || "Replaying previous turn...";
+      activeNote = true;
+    } else if (pending) {
       noteText = getChoicePromptText(pending);
       activeNote = true;
     } else if (waitingDeckFlip) {
@@ -4061,6 +4441,7 @@ function onContextActionClick(event) {
   if (action === "pass") {
     if (!decision.canPass) return;
     state.awaitingDecision = null;
+    recordTurnRecapDecision("pass", state.tableMultiplier, decision.passMultiplier);
     logPlayerMove(
       decision.playerIndex,
       decision.moveNumber,
