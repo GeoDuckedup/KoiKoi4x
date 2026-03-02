@@ -11,7 +11,7 @@
       <section class="captured-zone">
         <div class="captured-col">
           <div class="zone-header compact">
-            <span>CPU Captures</span>
+            <span id="cpu-captures-label">CPU Captures</span>
             <span id="cpu-captured-count">0</span>
           </div>
           <div id="cpu-captured" class="captured-grid"></div>
@@ -19,7 +19,7 @@
         </div>
         <div class="captured-col">
           <div class="zone-header compact">
-            <span>Your Captures</span>
+            <span id="player-captures-label">Your Captures</span>
             <span id="player-captured-count">0</span>
           </div>
           <div id="player-captured" class="captured-grid"></div>
@@ -52,7 +52,7 @@
 
       <section class="opponent-zone">
         <div class="zone-header">
-          <span class="zone-title-with-score">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
+          <span id="cpu-hand-label" class="zone-title-with-score">CPU Hand <strong id="cpu-score-inline" class="header-score">0</strong></span>
           <span id="cpu-hand-count">8 cards</span>
         </div>
         <div id="cpu-hand" class="cpu-hand-strip"></div>
@@ -60,7 +60,7 @@
 
       <section id="player-zone" class="player-zone">
         <div class="zone-header">
-          <span class="zone-title-with-score">Your Hand <strong id="player-score-inline" class="header-score">0</strong></span>
+          <span id="player-hand-label" class="zone-title-with-score">Your Hand <strong id="player-score-inline" class="header-score">0</strong></span>
         </div>
         <div id="hand-lock-note" class="hand-lock-note is-muted"></div>
         <div id="player-hand" class="hand player"></div>
@@ -94,8 +94,8 @@
             <thead>
               <tr>
                 <th>Month</th>
-                <th>You</th>
-                <th>CPU</th>
+                <th id="summary-col-you">You</th>
+                <th id="summary-col-cpu">CPU</th>
                 <th>Mult</th>
               </tr>
             </thead>
@@ -105,14 +105,14 @@
       </section>
 
       <section id="code-panel" class="code-panel" hidden>
-        <div class="code-panel-head">Save / Load Code</div>
-        <label class="code-label" for="export-code">Your current game code</label>
+        <div id="code-panel-head" class="code-panel-head">Save / Load Code</div>
+        <label id="export-code-label" class="code-label" for="export-code">Your current game code</label>
         <textarea id="export-code" class="code-text" readonly></textarea>
         <div class="code-actions">
           <button id="refresh-code-btn" type="button">Refresh Code</button>
           <button id="copy-code-btn" type="button">Copy Code</button>
         </div>
-        <label class="code-label" for="import-code">Load from code</label>
+        <label id="import-code-label" class="code-label" for="import-code">Load from code</label>
         <textarea id="import-code" class="code-text" placeholder="Paste a code here"></textarea>
         <div class="code-actions">
           <button id="load-code-btn" type="button">Load Code</button>
@@ -247,9 +247,17 @@
     <section id="start-menu" class="start-menu">
       <div class="start-card">
         <h2>Hanafuda Koi-Koi</h2>
-        <p>Start a new match or load from a code.</p>
-        <div class="start-actions">
-          <button id="start-new-btn" type="button" class="primary">New Game</button>
+        <p>Choose how you want to play, or load from a code.</p>
+        <div class="start-actions start-mode-actions">
+          <button id="start-mode-cpu-btn" type="button" class="primary">Play with CPU</button>
+          <button id="start-mode-friend-btn" type="button">Play with Friend</button>
+        </div>
+        <div id="start-friend-flow" class="start-friend-flow" hidden>
+          <div class="start-subtitle">Friend mode format</div>
+          <div class="start-actions">
+            <button id="start-friend-hotseat-btn" type="button">Hotseat (Same Phone)</button>
+            <button id="start-friend-code-btn" type="button">Code-Send (Two Devices)</button>
+          </div>
         </div>
         <label class="code-label" for="start-import-code">Enter Code</label>
         <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share code here"></textarea>
@@ -257,6 +265,22 @@
           <button id="start-load-btn" type="button">Load From Code</button>
         </div>
         <div id="start-menu-status" class="code-status"></div>
+      </div>
+    </section>
+
+    <section id="friend-interstitial" class="friend-interstitial" hidden>
+      <div class="friend-interstitial-card">
+        <h2 id="friend-interstitial-title">Pass to Player 2</h2>
+        <p id="friend-interstitial-text">Turn complete. Hand off to the next player.</p>
+        <div id="friend-turn-code-wrap" class="friend-turn-code-wrap" hidden>
+          <label class="code-label" for="friend-turn-code">Turn code</label>
+          <textarea id="friend-turn-code" class="code-text" readonly></textarea>
+        </div>
+        <div class="start-actions friend-interstitial-actions">
+          <button id="friend-copy-code-btn" type="button">Copy Turn Code</button>
+          <button id="friend-continue-btn" type="button" class="primary">Continue</button>
+        </div>
+        <div id="friend-interstitial-status" class="code-status"></div>
       </div>
     </section>
 

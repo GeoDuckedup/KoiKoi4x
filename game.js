@@ -350,8 +350,13 @@ const AI_STEP_CPU_PHASE1_PREVIEW_MS = 520;
 const AI_STEP_TARGET_MS = 340;
 const AI_STEP_DRAW_RESOLVE_MS = 360;
 const AI_STEP_DECISION_MS = 420;
-const SAVE_CODE_PREFIX = "HKK2";
-const SAVE_CODE_VERSION = 2;
+const SAVE_CODE_PREFIX = "HKK3";
+const SAVE_CODE_VERSION = 3;
+const SAVE_CODE_PREFIX_VERSION = {
+  HKK2: 2,
+  HKK3: 3,
+};
+const SUPPORTED_SAVE_VERSIONS = new Set(Object.values(SAVE_CODE_PREFIX_VERSION));
 
 const drawPreviewFx = {
   lastCardId: null,
@@ -396,6 +401,15 @@ const state = {
   aiTask: null,
   drawRevealTimer: null,
   autoFocusTargetKey: null,
+  playMode: "cpu",
+  friendFlow: "hotseat",
+  viewerPlayerIndex: 0,
+  interstitial: {
+    open: false,
+    nextPlayerIndex: null,
+  },
+  turnCheckpointReady: false,
+  lastExportMeta: null,
 };
 
 const ui = {};
@@ -455,6 +469,12 @@ function cacheUI() {
   ui.deckCount = document.getElementById("deck-count");
   ui.cpuCapturedCount = document.getElementById("cpu-captured-count");
   ui.playerCapturedCount = document.getElementById("player-captured-count");
+  ui.cpuCapturesLabel = document.getElementById("cpu-captures-label");
+  ui.playerCapturesLabel = document.getElementById("player-captures-label");
+  ui.cpuHandLabel = document.getElementById("cpu-hand-label");
+  ui.playerHandLabel = document.getElementById("player-hand-label");
+  ui.summaryColYou = document.getElementById("summary-col-you");
+  ui.summaryColCpu = document.getElementById("summary-col-cpu");
   ui.cpuYaku = document.getElementById("cpu-yaku");
   ui.playerYaku = document.getElementById("player-yaku");
   ui.koiState = document.getElementById("koi-state");
@@ -478,7 +498,10 @@ function cacheUI() {
   ui.contextRightBtn = document.getElementById("context-right-btn");
   ui.codeToggle = document.getElementById("code-toggle");
   ui.codePanel = document.getElementById("code-panel");
+  ui.codePanelHead = document.getElementById("code-panel-head");
+  ui.exportCodeLabel = document.getElementById("export-code-label");
   ui.exportCode = document.getElementById("export-code");
+  ui.importCodeLabel = document.getElementById("import-code-label");
   ui.importCode = document.getElementById("import-code");
   ui.codeStatus = document.getElementById("code-status");
   ui.refreshCodeBtn = document.getElementById("refresh-code-btn");
@@ -486,10 +509,22 @@ function cacheUI() {
   ui.loadCodeBtn = document.getElementById("load-code-btn");
   ui.closeCodeBtn = document.getElementById("close-code-btn");
   ui.startMenu = document.getElementById("start-menu");
-  ui.startNewBtn = document.getElementById("start-new-btn");
+  ui.startModeCpuBtn = document.getElementById("start-mode-cpu-btn");
+  ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
+  ui.startFriendFlow = document.getElementById("start-friend-flow");
+  ui.startFriendHotseatBtn = document.getElementById("start-friend-hotseat-btn");
+  ui.startFriendCodeBtn = document.getElementById("start-friend-code-btn");
   ui.startLoadBtn = document.getElementById("start-load-btn");
   ui.startImportCode = document.getElementById("start-import-code");
   ui.startMenuStatus = document.getElementById("start-menu-status");
+  ui.friendInterstitial = document.getElementById("friend-interstitial");
+  ui.friendInterstitialTitle = document.getElementById("friend-interstitial-title");
+  ui.friendInterstitialText = document.getElementById("friend-interstitial-text");
+  ui.friendTurnCodeWrap = document.getElementById("friend-turn-code-wrap");
+  ui.friendTurnCode = document.getElementById("friend-turn-code");
+  ui.friendCopyCodeBtn = document.getElementById("friend-copy-code-btn");
+  ui.friendContinueBtn = document.getElementById("friend-continue-btn");
+  ui.friendInterstitialStatus = document.getElementById("friend-interstitial-status");
   ui.rulesToggle = document.getElementById("rules-toggle");
   ui.rulesPanel = document.getElementById("rules-panel");
 }
@@ -509,8 +544,13 @@ function bindUI() {
     setCodePanelOpen(false);
     showStartMenu();
   });
-  ui.startNewBtn?.addEventListener("click", onStartNewFromMenu);
+  ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
+  ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
+  ui.startFriendHotseatBtn?.addEventListener("click", onStartFriendHotseatFromMenu);
+  ui.startFriendCodeBtn?.addEventListener("click", onStartFriendCodeFromMenu);
   ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
+  ui.friendCopyCodeBtn?.addEventListener("click", onFriendInterstitialCopyCode);
+  ui.friendContinueBtn?.addEventListener("click", onFriendInterstitialContinue);
   ui.rulesToggle.addEventListener("click", () => {
     ui.rulesPanel.hidden = !ui.rulesPanel.hidden;
     ui.rulesToggle.textContent = ui.rulesPanel.hidden ? "Rules" : "Hide Rules";
@@ -537,6 +577,8 @@ function showStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = false;
   }
+  setFriendInterstitialOpen(false);
+  setStartFriendFlowOpen(false);
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
   setCodePanelOpen(false);
@@ -547,7 +589,15 @@ function hideStartMenu() {
   if (ui.startMenu) {
     ui.startMenu.hidden = true;
   }
+  setFriendInterstitialOpen(false);
+  setStartFriendFlowOpen(false);
   setCodeStatus("", false, "start");
+}
+
+function setStartFriendFlowOpen(open) {
+  if (ui.startFriendFlow) {
+    ui.startFriendFlow.hidden = !open;
+  }
 }
 
 function setCodePanelOpen(open) {
@@ -582,14 +632,26 @@ function onToggleCodePanel() {
   setCodePanelOpen(nextOpen);
   if (nextOpen) {
     refreshExportCode();
-    setCodeStatus("", false, "panel");
+    if (isFriendCodeMode() && !isFriendTurnExportWindow()) {
+      setCodeStatus("Turn code unlocks after a full turn handoff.", false, "panel");
+    } else {
+      setCodeStatus("", false, "panel");
+    }
   }
 }
 
 function onRefreshCode() {
   if (!state.ready || !state.players.length) return;
+  if (isFriendCodeMode() && !isFriendTurnExportWindow()) {
+    setCodeStatus("Turn code is available after a full turn handoff.", true, "panel");
+    return;
+  }
   refreshExportCode();
-  setCodeStatus("Code refreshed.", false, "panel");
+  if (isFriendCodeMode()) {
+    setCodeStatus("Turn code generated.", false, "panel");
+  } else {
+    setCodeStatus("Code refreshed.", false, "panel");
+  }
 }
 
 function refreshExportCode() {
@@ -604,6 +666,10 @@ function refreshExportCode() {
 
 async function onCopyCode() {
   if (!ui.exportCode) return;
+  if (isFriendCodeMode() && !isFriendTurnExportWindow()) {
+    setCodeStatus("Turn code can only be copied at turn handoff.", true, "panel");
+    return;
+  }
   if (!ui.exportCode.value.trim()) {
     refreshExportCode();
   }
@@ -621,7 +687,11 @@ async function onCopyCode() {
       document.execCommand("copy");
       ui.exportCode.setSelectionRange(0, 0);
     }
-    setCodeStatus("Code copied to clipboard.", false, "panel");
+    if (isFriendCodeMode()) {
+      setCodeStatus("Turn code copied to clipboard.", false, "panel");
+    } else {
+      setCodeStatus("Code copied to clipboard.", false, "panel");
+    }
   } catch (err) {
     setCodeStatus(`Copy failed: ${err.message}`, true, "panel");
   }
@@ -632,10 +702,29 @@ function onLoadCodeFromPanel() {
   loadCodeIntoGame(raw, "panel");
 }
 
-function onStartNewFromMenu() {
+function onStartModeCpuFromMenu() {
   if (!state.ready) return;
   hideStartMenu();
-  startNewMatch();
+  startNewMatch({ playMode: "cpu" });
+}
+
+function onStartModeFriendFromMenu() {
+  if (!state.ready) return;
+  const currentlyOpen = ui.startFriendFlow ? !ui.startFriendFlow.hidden : false;
+  setStartFriendFlowOpen(!currentlyOpen);
+  setCodeStatus("", false, "start");
+}
+
+function onStartFriendHotseatFromMenu() {
+  if (!state.ready) return;
+  hideStartMenu();
+  startNewMatch({ playMode: "friend", friendFlow: "hotseat" });
+}
+
+function onStartFriendCodeFromMenu() {
+  if (!state.ready) return;
+  hideStartMenu();
+  startNewMatch({ playMode: "friend", friendFlow: "code" });
 }
 
 function onStartLoadFromMenu() {
@@ -651,6 +740,77 @@ function setCodeStatus(message, isError, target = "panel") {
   node.classList.toggle("success", Boolean(message && !isError));
 }
 
+function setFriendInterstitialStatus(message, isError) {
+  if (!ui.friendInterstitialStatus) return;
+  ui.friendInterstitialStatus.textContent = message || "";
+  ui.friendInterstitialStatus.classList.toggle("error", Boolean(message && isError));
+  ui.friendInterstitialStatus.classList.toggle("success", Boolean(message && !isError));
+}
+
+function setFriendInterstitialOpen(open, nextPlayerIndex = null) {
+  const shouldOpen = Boolean(open);
+  const normalizedNext =
+    shouldOpen && nextPlayerIndex !== null && nextPlayerIndex !== undefined
+      ? asPlayerIndex(nextPlayerIndex, "interstitial.nextPlayerIndex")
+      : null;
+  state.interstitial = {
+    open: shouldOpen,
+    nextPlayerIndex: shouldOpen ? (normalizedNext === null ? state.currentPlayer : normalizedNext) : null,
+  };
+  if (!shouldOpen) {
+    setFriendInterstitialStatus("", false);
+  }
+}
+
+function prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {
+  if (!isFriendMode()) return;
+  if (Number.isFinite(lastActorIndex) && Number.isFinite(moveNumber)) {
+    state.lastExportMeta = {
+      turnNumber: Math.max(1, Number(moveNumber)),
+      playerIndex: asPlayerIndex(lastActorIndex, "lastExportMeta.playerIndex"),
+    };
+  }
+  setFriendInterstitialOpen(true, nextPlayerIndex);
+}
+
+async function onFriendInterstitialCopyCode() {
+  if (!isFriendMode() || !state.interstitial?.open) return;
+  let code = "";
+  try {
+    code = encodeStateToCode();
+  } catch (err) {
+    setFriendInterstitialStatus(`Could not generate code: ${err.message}`, true);
+    return;
+  }
+  if (ui.friendTurnCode) {
+    ui.friendTurnCode.value = code;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(code);
+    } else if (ui.friendTurnCode) {
+      ui.friendTurnCode.focus();
+      ui.friendTurnCode.select();
+      document.execCommand("copy");
+      ui.friendTurnCode.setSelectionRange(0, 0);
+    }
+    setFriendInterstitialStatus("Turn code copied.", false);
+  } catch (err) {
+    setFriendInterstitialStatus(`Copy failed: ${err.message}`, true);
+  }
+}
+
+function onFriendInterstitialContinue() {
+  if (!isFriendMode() || !state.interstitial?.open) return;
+  const nextPlayerIndex =
+    state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
+      ? state.currentPlayer
+      : state.interstitial.nextPlayerIndex;
+  state.viewerPlayerIndex = nextPlayerIndex;
+  setFriendInterstitialOpen(false);
+  renderAll();
+}
+
 function loadCodeIntoGame(rawInput, target = "panel") {
   const normalized = String(rawInput || "").trim();
   if (!normalized) {
@@ -660,10 +820,16 @@ function loadCodeIntoGame(rawInput, target = "panel") {
 
   try {
     const snapshot = decodeGameCode(normalized);
+    validateFriendCodeSnapshotForImport(snapshot);
     applySnapshot(snapshot);
     hideStartMenu();
     setCodePanelOpen(false);
-    setCodeStatus("Code loaded successfully.", false, target);
+    if (snapshot.playMode === "friend" && snapshot.friendFlow === "code" && snapshot.lastExportMeta) {
+      const playerLabel = `Player ${snapshot.lastExportMeta.playerIndex + 1}`;
+      setCodeStatus(`Turn code loaded (${playerLabel}, move ${snapshot.lastExportMeta.turnNumber}).`, false, target);
+    } else {
+      setCodeStatus("Code loaded successfully.", false, target);
+    }
     if (target === "panel" && ui.importCode) {
       ui.importCode.value = "";
     }
@@ -676,9 +842,40 @@ function loadCodeIntoGame(rawInput, target = "panel") {
   }
 }
 
-function createPlayer(name, isHuman) {
+function validateFriendCodeSnapshotForImport(snapshot) {
+  if (!snapshot || snapshot.playMode !== "friend" || snapshot.friendFlow !== "code") return;
+  if (snapshot.turnCheckpointReady !== true) {
+    throw new Error("This turn code is not at a valid handoff checkpoint");
+  }
+  if (!snapshot.interstitial || snapshot.interstitial.open !== true) {
+    throw new Error("Turn code is missing handoff state");
+  }
+  const nextPlayerIndex = snapshot.interstitial.nextPlayerIndex;
+  if (nextPlayerIndex !== 0 && nextPlayerIndex !== 1) {
+    throw new Error("Turn code is missing next player metadata");
+  }
+  if (snapshot.currentPlayer !== nextPlayerIndex) {
+    throw new Error("Turn code turn-owner metadata is invalid");
+  }
+  if (!snapshot.lastExportMeta || typeof snapshot.lastExportMeta !== "object") {
+    throw new Error("Turn code is missing export metadata");
+  }
+  const exporter = snapshot.lastExportMeta.playerIndex;
+  if (exporter !== 0 && exporter !== 1) {
+    throw new Error("Turn code exporter metadata is invalid");
+  }
+  if (exporter === nextPlayerIndex) {
+    throw new Error("Turn code exporter and receiver cannot be the same player");
+  }
+  if (!Number.isFinite(snapshot.lastExportMeta.turnNumber) || snapshot.lastExportMeta.turnNumber < 1) {
+    throw new Error("Turn code move metadata is invalid");
+  }
+}
+
+function createPlayer(name, isHuman, roleLabel = name) {
   return {
     name,
+    roleLabel,
     isHuman,
     score: 0,
     hand: [],
@@ -703,7 +900,8 @@ function decodeGameCode(code) {
     throw new Error("Bad format. Expected prefix.payload.checksum");
   }
   const [prefix, payload, checksum] = parts;
-  if (prefix !== SAVE_CODE_PREFIX) {
+  const expectedVersion = SAVE_CODE_PREFIX_VERSION[prefix];
+  if (!expectedVersion) {
     throw new Error("Unknown code prefix");
   }
   const expected = computeCodeChecksum(payload);
@@ -719,13 +917,39 @@ function decodeGameCode(code) {
     throw new Error(`Invalid payload: ${err.message}`);
   }
 
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Invalid payload object");
+  }
+  if (parsed.v !== expectedVersion) {
+    throw new Error(`Version mismatch for ${prefix}`);
+  }
+
   validateSnapshot(parsed);
   return parsed;
 }
 
 function buildSnapshot() {
+  const checkpointReady = computeTurnCheckpointReady();
+  state.turnCheckpointReady = checkpointReady;
   return {
     v: SAVE_CODE_VERSION,
+    playMode: state.playMode,
+    friendFlow: state.friendFlow,
+    viewerPlayerIndex: state.viewerPlayerIndex,
+    interstitial: {
+      open: Boolean(state.interstitial?.open),
+      nextPlayerIndex:
+        state.interstitial?.nextPlayerIndex === null || state.interstitial?.nextPlayerIndex === undefined
+          ? null
+          : state.interstitial.nextPlayerIndex,
+    },
+    turnCheckpointReady: checkpointReady,
+    lastExportMeta: state.lastExportMeta
+      ? {
+          turnNumber: state.lastExportMeta.turnNumber,
+          playerIndex: state.lastExportMeta.playerIndex,
+        }
+      : null,
     aiProfile: state.aiProfile,
     gameNumber: state.gameNumber,
     maxGames: state.maxGames,
@@ -752,6 +976,9 @@ function buildSnapshot() {
     field: state.field.map((card) => card.id),
     drawPile: state.drawPile.map((card) => card.id),
     players: state.players.map((player) => ({
+      name: player.name,
+      roleLabel: player.roleLabel,
+      isHuman: player.isHuman,
       score: player.score,
       hand: player.hand.map((card) => card.id),
       captured: player.captured.map((card) => card.id),
@@ -816,8 +1043,21 @@ function validateSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("Snapshot must be an object");
   }
-  if (snapshot.v !== SAVE_CODE_VERSION) {
-    throw new Error(`Unsupported version ${snapshot.v}`);
+  const snapshotVersion = asInt(snapshot.v, "v");
+  if (!SUPPORTED_SAVE_VERSIONS.has(snapshotVersion)) {
+    throw new Error(`Unsupported version ${snapshotVersion}`);
+  }
+  if (snapshotVersion >= 3) {
+    validatePlayMode(snapshot.playMode, "playMode");
+    validateFriendFlow(snapshot.friendFlow, "friendFlow");
+    ensureNullablePlayerIndex(snapshot.viewerPlayerIndex, "viewerPlayerIndex");
+    validateInterstitialSnapshot(snapshot.interstitial);
+    if (typeof snapshot.turnCheckpointReady !== "boolean") {
+      throw new Error("turnCheckpointReady must be boolean");
+    }
+    if (snapshot.lastExportMeta !== null && snapshot.lastExportMeta !== undefined) {
+      validateLastExportMetaSnapshot(snapshot.lastExportMeta);
+    }
   }
   if (!Array.isArray(snapshot.players) || snapshot.players.length !== 2) {
     throw new Error("Snapshot must contain exactly two players");
@@ -863,6 +1103,15 @@ function validateSnapshot(snapshot) {
     if (!player || typeof player !== "object") {
       throw new Error(`players[${playerIndex}] must be an object`);
     }
+    if (player.name !== undefined && typeof player.name !== "string") {
+      throw new Error(`players[${playerIndex}].name must be a string`);
+    }
+    if (player.roleLabel !== undefined && typeof player.roleLabel !== "string") {
+      throw new Error(`players[${playerIndex}].roleLabel must be a string`);
+    }
+    if (player.isHuman !== undefined && typeof player.isHuman !== "boolean") {
+      throw new Error(`players[${playerIndex}].isHuman must be boolean`);
+    }
     asInt(player.score, `players[${playerIndex}].score`);
     if (!Array.isArray(player.hand) || !Array.isArray(player.captured)) {
       throw new Error(`players[${playerIndex}] hand/captured must be arrays`);
@@ -885,8 +1134,39 @@ function validateSnapshot(snapshot) {
   }
 
   // Keep explicit references in case we later add stricter rules.
+  void snapshotVersion;
   void dealer;
   void currentPlayer;
+}
+
+function validatePlayMode(value, label) {
+  if (value !== "cpu" && value !== "friend") {
+    throw new Error(`${label} must be cpu or friend`);
+  }
+}
+
+function validateFriendFlow(value, label) {
+  if (value !== "hotseat" && value !== "code") {
+    throw new Error(`${label} must be hotseat or code`);
+  }
+}
+
+function validateInterstitialSnapshot(interstitial) {
+  if (!interstitial || typeof interstitial !== "object") {
+    throw new Error("interstitial must be an object");
+  }
+  if (typeof interstitial.open !== "boolean") {
+    throw new Error("interstitial.open must be boolean");
+  }
+  ensureNullablePlayerIndex(interstitial.nextPlayerIndex, "interstitial.nextPlayerIndex");
+}
+
+function validateLastExportMetaSnapshot(meta) {
+  if (!meta || typeof meta !== "object") {
+    throw new Error("lastExportMeta must be an object");
+  }
+  asInt(meta.turnNumber, "lastExportMeta.turnNumber");
+  asPlayerIndex(meta.playerIndex, "lastExportMeta.playerIndex");
 }
 
 function validatePendingSelectionSnapshot(pending) {
@@ -943,11 +1223,18 @@ function applySnapshot(snapshot) {
   clearDrawRevealTask();
   resetDrawPreviewFx();
 
+  state.playMode = normalizePlayMode(snapshot.playMode);
+  state.friendFlow = normalizeFriendFlow(snapshot.friendFlow);
   state.aiProfile = AI_PROFILES[snapshot.aiProfile] ? snapshot.aiProfile : DEFAULT_AI_PROFILE;
   state.gameNumber = asInt(snapshot.gameNumber, "gameNumber");
   state.maxGames = asInt(snapshot.maxGames, "maxGames");
   state.dealer = asPlayerIndex(snapshot.dealer, "dealer");
   state.currentPlayer = asPlayerIndex(snapshot.currentPlayer, "currentPlayer");
+  const viewerPlayer = asNullablePlayerIndex(snapshot.viewerPlayerIndex, "viewerPlayerIndex");
+  state.viewerPlayerIndex = viewerPlayer === null ? (state.playMode === "friend" ? state.currentPlayer : 0) : viewerPlayer;
+  state.interstitial = normalizeInterstitial(snapshot.interstitial);
+  state.turnCheckpointReady = Boolean(snapshot.turnCheckpointReady);
+  state.lastExportMeta = normalizeLastExportMeta(snapshot.lastExportMeta);
   state.tableMultiplier = asInt(snapshot.tableMultiplier, "tableMultiplier");
   state.lastKoiCaller = asNullablePlayerIndex(snapshot.lastKoiCaller, "lastKoiCaller");
   state.firstYakuPlayer = asNullablePlayerIndex(snapshot.firstYakuPlayer, "firstYakuPlayer");
@@ -977,6 +1264,17 @@ function applySnapshot(snapshot) {
   for (let i = 0; i < 2; i += 1) {
     const source = snapshot.players[i];
     const target = state.players[i];
+    if (typeof source.name === "string" && source.name.trim()) {
+      target.name = source.name;
+    }
+    if (typeof source.roleLabel === "string" && source.roleLabel.trim()) {
+      target.roleLabel = source.roleLabel;
+    } else {
+      target.roleLabel = target.name;
+    }
+    if (typeof source.isHuman === "boolean") {
+      target.isHuman = source.isHuman;
+    }
     target.score = Math.max(0, asInt(source.score, `players[${i}].score`));
     target.hand = sortByMonth(cardIdsToCards(source.hand, `players[${i}].hand`));
     target.captured = cardIdsToCards(source.captured, `players[${i}].captured`);
@@ -1003,6 +1301,15 @@ function applySnapshot(snapshot) {
   state.awaitingDecision = hydrateAwaitingDecision(snapshot.awaitingDecision);
   state.aiPreview = hydrateAiPreview(snapshot.aiPreview);
   state.cpuPhase1PreviewCardId = snapshot.cpuPhase1PreviewCardId || null;
+
+  if (state.playMode === "friend" && state.friendFlow === "code" && state.interstitial.open) {
+    const nextPlayerIndex =
+      state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
+        ? state.currentPlayer
+        : state.interstitial.nextPlayerIndex;
+    state.viewerPlayerIndex = nextPlayerIndex;
+    setFriendInterstitialOpen(false);
+  }
 
   validateHydratedStateCardOwnership();
   state.autoFocusTargetKey = null;
@@ -1066,6 +1373,31 @@ function hydrateAiPreview(aiPreview) {
   return {
     options: Array.isArray(aiPreview.options) ? aiPreview.options.map(String) : [],
     prompt: String(aiPreview.prompt || ""),
+  };
+}
+
+function normalizePlayMode(value) {
+  return value === "friend" ? "friend" : "cpu";
+}
+
+function normalizeFriendFlow(value) {
+  return value === "code" ? "code" : "hotseat";
+}
+
+function normalizeInterstitial(interstitial) {
+  const open = Boolean(interstitial?.open);
+  const nextPlayerIndex = asNullablePlayerIndex(interstitial?.nextPlayerIndex, "interstitial.nextPlayerIndex");
+  return {
+    open,
+    nextPlayerIndex,
+  };
+}
+
+function normalizeLastExportMeta(meta) {
+  if (!meta || typeof meta !== "object") return null;
+  return {
+    turnNumber: asInt(meta.turnNumber, "lastExportMeta.turnNumber"),
+    playerIndex: asPlayerIndex(meta.playerIndex, "lastExportMeta.playerIndex"),
   };
 }
 
@@ -1302,18 +1634,39 @@ function pushActionLog(prefix, text) {
   }
 }
 
-function startNewMatch() {
+function startNewMatch(options = {}) {
   hideStartMenu();
   setCodePanelOpen(false);
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
   setCodeStatus("", false, "panel");
+  const playModeSource = options.playMode || state.playMode || "cpu";
+  const friendFlowSource = options.friendFlow || state.friendFlow || "hotseat";
+  const playMode = playModeSource === "friend" ? "friend" : "cpu";
+  const friendFlow = friendFlowSource === "code" ? "code" : "hotseat";
   clearAITask();
-  state.aiProfile = pickRandomAIProfile();
-  state.players = [createPlayer("You", true), createPlayer("CPU", false)];
+  state.playMode = playMode;
+  state.friendFlow = friendFlow;
+  if (playMode === "friend") {
+    state.aiProfile = DEFAULT_AI_PROFILE;
+    state.players = [
+      createPlayer("Player 1", true, "Player 1"),
+      createPlayer("Player 2", true, "Player 2"),
+    ];
+  } else {
+    state.aiProfile = pickRandomAIProfile();
+    state.players = [createPlayer("You", true, "Player 1"), createPlayer("CPU", false, "CPU")];
+  }
+  state.interstitial = {
+    open: false,
+    nextPlayerIndex: null,
+  };
+  state.turnCheckpointReady = false;
+  state.lastExportMeta = null;
   state.gameNumber = 1;
   state.dealer = Math.random() < 0.5 ? 0 : 1;
   state.currentPlayer = state.dealer;
+  state.viewerPlayerIndex = playMode === "friend" ? state.currentPlayer : 0;
   state.roundSpecialTwoXPlayer = null;
   state.nextRoundSpecialTwoXPlayer = null;
   state.roundLeaderAtStart = null;
@@ -1357,6 +1710,13 @@ function startRound() {
   };
   state.autoFocusTargetKey = null;
   state.autoFocusTargetKey = null;
+  state.interstitial = {
+    open: false,
+    nextPlayerIndex: null,
+  };
+  if (isFriendMode()) {
+    state.viewerPlayerIndex = state.currentPlayer;
+  }
 
   const p0 = state.players[0].score;
   const p1 = state.players[1].score;
@@ -1433,6 +1793,89 @@ function hasMonthSetOfFour(cards) {
   return Object.values(counts).some((count) => count >= 4);
 }
 
+function isFriendMode() {
+  return state.playMode === "friend";
+}
+
+function isFriendCodeMode() {
+  return isFriendMode() && state.friendFlow === "code";
+}
+
+function isFriendTurnExportWindow() {
+  return isFriendCodeMode() && Boolean(state.interstitial?.open);
+}
+
+function getViewerPlayerIndex() {
+  const parsed = asNullablePlayerIndex(state.viewerPlayerIndex, "state.viewerPlayerIndex");
+  if (parsed === null) return 0;
+  return parsed;
+}
+
+function getDisplayBottomPlayerIndex() {
+  return isFriendMode() ? getViewerPlayerIndex() : 0;
+}
+
+function getDisplayTopPlayerIndex() {
+  return getDisplayBottomPlayerIndex() === 0 ? 1 : 0;
+}
+
+function getSummaryColumnLabel(playerIndex) {
+  const player = state.players[playerIndex];
+  return player?.name || `P${playerIndex + 1}`;
+}
+
+function getLatestRoundOutcome() {
+  if (!state.roundHistory.length) return null;
+  const last = state.roundHistory[state.roundHistory.length - 1];
+  if (!last || last.noScore) {
+    return {
+      noScore: true,
+      winnerIndex: null,
+      points: 0,
+    };
+  }
+  const p0Points = Math.max(0, Number(last.you) || 0);
+  const p1Points = Math.max(0, Number(last.cpu) || 0);
+  if (p0Points === p1Points) {
+    return {
+      noScore: false,
+      winnerIndex: null,
+      points: p0Points,
+    };
+  }
+  if (p0Points > p1Points) {
+    return {
+      noScore: false,
+      winnerIndex: 0,
+      points: p0Points,
+    };
+  }
+  return {
+    noScore: false,
+    winnerIndex: 1,
+    points: p1Points,
+  };
+}
+
+function canRevealBottomHand() {
+  if (!isFriendMode()) return true;
+  if (state.interstitial?.open) return false;
+  return getViewerPlayerIndex() === state.currentPlayer;
+}
+
+function getInteractiveHumanPlayerIndex() {
+  if (state.roundOver || state.matchOver) return null;
+  if (state.interstitial?.open) return null;
+  const current = state.players[state.currentPlayer];
+  if (!current || !current.isHuman) return null;
+  if (!isFriendMode()) {
+    return state.currentPlayer === 0 ? 0 : null;
+  }
+  const viewerIndex = getViewerPlayerIndex();
+  if (viewerIndex !== state.currentPlayer) return null;
+  return viewerIndex;
+}
+
 function detectLuckyHand(hand) {
   const counts = {};
   for (const card of hand) {
@@ -1450,24 +1893,25 @@ function detectLuckyHand(hand) {
 
 function onPlayerHandClick(event) {
   if (!state.ready || state.roundOver || state.awaitingDecision || state.awaitingDeckFlip) return;
-  if (state.currentPlayer !== 0) return;
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+  if (interactivePlayerIndex === null) return;
 
   const pending = state.pendingSelection;
   const handPreviewPending =
     Boolean(pending) &&
-    pending.playerIndex === 0 &&
+    pending.playerIndex === interactivePlayerIndex &&
     (pending.type === "handMatch" || pending.type === "handPlace");
 
   const cardNode = event.target.closest("[data-card-id]");
   if (!cardNode) {
     if (handPreviewPending) {
-      clearPlayerHandPreview();
+      clearPlayerHandPreview(interactivePlayerIndex);
     }
     return;
   }
 
   const cardId = cardNode.dataset.cardId;
-  const player = state.players[0];
+  const player = state.players[interactivePlayerIndex];
   const card = player.hand.find((entry) => entry.id === cardId);
   if (!card) return;
 
@@ -1476,21 +1920,22 @@ function onPlayerHandClick(event) {
     if (handPreviewPending) {
       if (pending.cardId === cardId) {
         if (pending.type === "handPlace" || pending.type === "handMatch") {
-          clearPlayerHandPreview();
+          clearPlayerHandPreview(interactivePlayerIndex);
         }
         return;
       }
-      previewPlayerHandCard(cardId);
+      previewPlayerHandCard(cardId, interactivePlayerIndex);
       return;
     }
     return;
   }
 
-  previewPlayerHandCard(cardId);
+  previewPlayerHandCard(cardId, interactivePlayerIndex);
 }
 
-function previewPlayerHandCard(cardId) {
-  const player = state.players[0];
+function previewPlayerHandCard(cardId, playerIndex = getInteractiveHumanPlayerIndex()) {
+  if (playerIndex === null || playerIndex === undefined) return;
+  const player = state.players[playerIndex];
   const card = player.hand.find((entry) => entry.id === cardId);
   if (!card) return;
 
@@ -1505,7 +1950,7 @@ function previewPlayerHandCard(cardId) {
     beginPendingSelection(
       {
         type: "handMatch",
-        playerIndex: 0,
+        playerIndex,
         cardId,
         options: matches.map((entry) => entry.id),
       },
@@ -1518,7 +1963,7 @@ function previewPlayerHandCard(cardId) {
   beginPendingSelection(
     {
       type: "handPlace",
-      playerIndex: 0,
+      playerIndex,
       cardId,
       options: [cardId],
     },
@@ -1527,10 +1972,10 @@ function previewPlayerHandCard(cardId) {
   );
 }
 
-function clearPlayerHandPreview() {
+function clearPlayerHandPreview(playerIndex = getDisplayBottomPlayerIndex()) {
   const pending = state.pendingSelection;
   if (!pending) return;
-  if (pending.playerIndex !== 0) return;
+  if (pending.playerIndex !== playerIndex) return;
   if (pending.type !== "handMatch" && pending.type !== "handPlace") return;
   state.pendingSelection = null;
   state.message = `${state.players[state.currentPlayer].name} to play. Table ${state.tableMultiplier}x.`;
@@ -1539,11 +1984,14 @@ function clearPlayerHandPreview() {
 
 function onFieldClick(event) {
   if (state.awaitingDeckFlip) return;
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+  if (interactivePlayerIndex === null) return;
   const cardNode = event.target.closest("[data-card-id]");
   if (!cardNode) return;
 
   const selectedId = cardNode.dataset.cardId;
   const pending = state.pendingSelection;
+  if (pending?.playerIndex !== interactivePlayerIndex) return;
   if (!pending || !pending.options.includes(selectedId)) return;
 
   if (pending.type === "handPlace") {
@@ -1558,9 +2006,11 @@ function onFieldClick(event) {
 }
 
 function onDrawPreviewClick() {
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+  if (interactivePlayerIndex === null) return;
   const flip = state.awaitingDeckFlip;
   if (!flip) return;
-  if (flip.playerIndex !== 0 || state.currentPlayer !== 0) return;
+  if (flip.playerIndex !== interactivePlayerIndex || state.currentPlayer !== interactivePlayerIndex) return;
   if (flip.revealed || state.roundOver || state.awaitingDecision || state.pendingSelection) return;
 
   flip.revealed = true;
@@ -2041,7 +2491,7 @@ function buildDecisionPrompt(decision) {
   const base = `${owner} formed ${decision.yakuText}.`;
   const phaseText = decision.resumeDrawPhase ? " Decide before deck draw." : "";
   if (!decision.canPass) {
-    return `${base} You are forced to Koi-Koi.${phaseText}`;
+    return `${base} ${owner} is forced to Koi-Koi.${phaseText}`;
   }
   if (decision.specialTwoXActive) {
     return `${base} Pass for 2x, or Koi-Koi to jump table to 3x.${phaseText}`;
@@ -2261,9 +2711,16 @@ function applyKoiAndContinue(decision) {
 }
 
 function moveToNextPlayer() {
+  const previousPlayerIndex = state.currentPlayer;
+  const previousTurnNumber = state.moveCounts[previousPlayerIndex];
   state.currentPlayer = state.currentPlayer === 0 ? 1 : 0;
   state.message = `${state.players[state.currentPlayer].name} to play. Table ${state.tableMultiplier}x.`;
   addSystemLog(state.message);
+  if (isFriendMode()) {
+    prepareFriendTurnHandoff(previousPlayerIndex, previousTurnNumber, state.currentPlayer);
+  } else {
+    state.viewerPlayerIndex = 0;
+  }
   renderAll();
   if (!state.players[state.currentPlayer].isHuman) {
     queueAITurn(420);
@@ -2370,14 +2827,16 @@ function endRoundWithWinner(winnerIndex, basePoints, multiplierUsed, reason) {
 }
 
 function applyFinalMessage() {
-  const player = state.players[0].score;
-  const cpu = state.players[1].score;
-  if (player > cpu) {
-    state.message = `Match complete. You win (${player} - ${cpu}).`;
-  } else if (cpu > player) {
-    state.message = `Match complete. CPU wins (${cpu} - ${player}).`;
+  const p0 = state.players[0].score;
+  const p1 = state.players[1].score;
+  const p0Name = state.players[0].name;
+  const p1Name = state.players[1].name;
+  if (p0 > p1) {
+    state.message = `Match complete. ${p0Name} wins (${p0} - ${p1}).`;
+  } else if (p1 > p0) {
+    state.message = `Match complete. ${p1Name} wins (${p1} - ${p0}).`;
   } else {
-    state.message = `Match complete. Draw (${player} - ${cpu}).`;
+    state.message = `Match complete. Draw (${p0} - ${p1}).`;
   }
 }
 
@@ -2708,6 +3167,7 @@ function computeYaku(captured, roundMonth) {
 }
 
 function renderAll() {
+  state.turnCheckpointReady = computeTurnCheckpointReady();
   renderTop();
   renderRoundSummary();
   renderActionLog();
@@ -2717,25 +3177,137 @@ function renderAll() {
   renderDrawPreview();
   renderCaptured();
   renderContextBar();
+  renderFriendInterstitial();
+  renderCodePanel();
   paintAllCards();
   if (ui.codePanel && !ui.codePanel.hidden && state.players.length) {
-    try {
-      ui.exportCode.value = encodeStateToCode();
-    } catch (_err) {
-      // Leave last value if encoding fails during an in-flight transient state.
+    if (isFriendCodeMode() && !isFriendTurnExportWindow()) {
+      ui.exportCode.value = "";
+    } else {
+      try {
+        ui.exportCode.value = encodeStateToCode();
+      } catch (_err) {
+        // Leave last value if encoding fails during an in-flight transient state.
+      }
     }
   }
   focusActiveActionTarget();
 }
 
+function renderCodePanel() {
+  if (!ui.codePanel) return;
+  const friendCodeMode = isFriendCodeMode();
+  const handoffOpen = isFriendTurnExportWindow();
+
+  if (ui.codePanelHead) {
+    ui.codePanelHead.textContent = friendCodeMode ? "Turn Code" : "Save / Load Code";
+  }
+  if (ui.exportCodeLabel) {
+    ui.exportCodeLabel.textContent = friendCodeMode ? "Current turn code" : "Your current game code";
+  }
+  if (ui.importCodeLabel) {
+    ui.importCodeLabel.textContent = friendCodeMode ? "Load turn code" : "Load from code";
+  }
+  if (ui.refreshCodeBtn) {
+    ui.refreshCodeBtn.textContent = friendCodeMode ? "Generate Turn Code" : "Refresh Code";
+    ui.refreshCodeBtn.disabled = friendCodeMode && !handoffOpen;
+  }
+  if (ui.copyCodeBtn) {
+    ui.copyCodeBtn.textContent = friendCodeMode ? "Copy Turn Code" : "Copy Code";
+    ui.copyCodeBtn.disabled = friendCodeMode && !handoffOpen;
+  }
+  if (ui.importCode) {
+    ui.importCode.placeholder = friendCodeMode ? "Paste turn code from other player" : "Paste a code here";
+  }
+  if (ui.exportCode) {
+    ui.exportCode.placeholder =
+      friendCodeMode && !handoffOpen
+        ? "Turn code appears after a full turn handoff."
+        : "";
+  }
+}
+
+function computeTurnCheckpointReady() {
+  if (state.matchOver || state.roundOver) return false;
+  if (state.pendingSelection || state.awaitingDeckFlip || state.awaitingDecision) return false;
+  if (state.aiPreview || state.cpuPhase1PreviewCardId) return false;
+  if (isFriendCodeMode()) {
+    return Boolean(state.interstitial?.open);
+  }
+  if (isFriendMode() && state.friendFlow === "hotseat" && state.interstitial?.open) return false;
+  return true;
+}
+
+function renderFriendInterstitial() {
+  if (!ui.friendInterstitial) return;
+  const open = isFriendMode() && Boolean(state.interstitial?.open);
+  ui.friendInterstitial.hidden = !open;
+  if (!open) return;
+
+  const nextPlayerIndex =
+    state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
+      ? state.currentPlayer
+      : state.interstitial.nextPlayerIndex;
+  const nextName = state.players[nextPlayerIndex]?.name || `Player ${nextPlayerIndex + 1}`;
+  const previousPlayerIndex = nextPlayerIndex === 0 ? 1 : 0;
+  const previousName = state.players[previousPlayerIndex]?.name || `Player ${previousPlayerIndex + 1}`;
+  const isCodeFlow = state.friendFlow === "code";
+
+  if (ui.friendInterstitialTitle) {
+    ui.friendInterstitialTitle.textContent = isCodeFlow ? `Send Turn Code to ${nextName}` : `Pass to ${nextName}`;
+  }
+  if (ui.friendInterstitialText) {
+    const moveText = state.lastExportMeta
+      ? ` (${previousName} move ${state.lastExportMeta.turnNumber})`
+      : "";
+    ui.friendInterstitialText.textContent = isCodeFlow
+      ? `${previousName}'s turn is complete${moveText}. Copy this code and send it to ${nextName}.`
+      : `${previousName}'s turn is complete${moveText}. Pass the phone to ${nextName}, then continue.`;
+  }
+  if (ui.friendTurnCodeWrap) {
+    ui.friendTurnCodeWrap.hidden = !isCodeFlow;
+  }
+  if (ui.friendCopyCodeBtn) {
+    ui.friendCopyCodeBtn.hidden = !isCodeFlow;
+  }
+  if (ui.friendContinueBtn) {
+    ui.friendContinueBtn.textContent = isCodeFlow ? "Continue on This Device" : `${nextName} Ready`;
+  }
+  if (ui.friendTurnCode) {
+    if (!isCodeFlow) {
+      ui.friendTurnCode.value = "";
+    } else {
+      try {
+        ui.friendTurnCode.value = encodeStateToCode();
+      } catch (_err) {
+        ui.friendTurnCode.value = "";
+      }
+    }
+  }
+}
+
 function getActiveActionFocusKey() {
-  const pending = state.pendingSelection && state.pendingSelection.playerIndex === 0 ? state.pendingSelection : null;
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+  const pending =
+    state.pendingSelection && interactivePlayerIndex !== null && state.pendingSelection.playerIndex === interactivePlayerIndex
+      ? state.pendingSelection
+      : null;
   if (pending) return "field-zone";
 
-  const awaitingFlip = state.awaitingDeckFlip;
+  const awaitingFlip =
+    state.awaitingDeckFlip &&
+    interactivePlayerIndex !== null &&
+    state.awaitingDeckFlip.playerIndex === interactivePlayerIndex
+      ? state.awaitingDeckFlip
+      : null;
   if (awaitingFlip) return "draw-preview";
 
-  if (state.awaitingDecision && state.awaitingDecision.kind === "stopOrKoi" && state.awaitingDecision.playerIndex === 0) {
+  if (
+    state.awaitingDecision &&
+    state.awaitingDecision.kind === "stopOrKoi" &&
+    interactivePlayerIndex !== null &&
+    state.awaitingDecision.playerIndex === interactivePlayerIndex
+  ) {
     return "context-zone";
   }
 
@@ -2744,16 +3316,16 @@ function getActiveActionFocusKey() {
   }
 
   const canPickHandCard =
-    state.currentPlayer === 0 &&
+    interactivePlayerIndex !== null &&
     !state.roundOver &&
     !state.awaitingDecision &&
     !state.pendingSelection &&
     !state.awaitingDeckFlip &&
-    state.players[0].hand.length > 0;
+    state.players[interactivePlayerIndex].hand.length > 0;
   if (canPickHandCard) return "player-zone";
 
   const cpuPlaying =
-    state.currentPlayer === 1 &&
+    !state.players[state.currentPlayer].isHuman &&
     !state.roundOver &&
     !state.awaitingDecision;
   if (cpuPlaying) {
@@ -2815,22 +3387,42 @@ function scrollTargetIntoViewSmart(target) {
 }
 
 function renderTop() {
-  if (ui.cpuScoreInline) ui.cpuScoreInline.textContent = String(state.players[1].score);
-  if (ui.playerScoreInline) ui.playerScoreInline.textContent = String(state.players[0].score);
+  const topPlayerIndex = getDisplayTopPlayerIndex();
+  const bottomPlayerIndex = getDisplayBottomPlayerIndex();
+  const topName = state.players[topPlayerIndex]?.name || "Player";
+  const bottomName = state.players[bottomPlayerIndex]?.name || "Player";
+  const topHandText = isFriendMode() ? `${topName} Hand` : "CPU Hand";
+  const bottomHandText = isFriendMode() ? `${bottomName} Hand` : "Your Hand";
+  const topCapturesText = isFriendMode() ? `${topName} Captures` : "CPU Captures";
+  const bottomCapturesText = isFriendMode() ? `${bottomName} Captures` : "Your Captures";
+  if (ui.cpuHandLabel) {
+    ui.cpuHandLabel.innerHTML = `${escapeHtml(topHandText)} <strong id="cpu-score-inline" class="header-score">${state.players[topPlayerIndex].score}</strong>`;
+    ui.cpuScoreInline = document.getElementById("cpu-score-inline");
+  }
+  if (ui.playerHandLabel) {
+    ui.playerHandLabel.innerHTML = `${escapeHtml(bottomHandText)} <strong id="player-score-inline" class="header-score">${state.players[bottomPlayerIndex].score}</strong>`;
+    ui.playerScoreInline = document.getElementById("player-score-inline");
+  }
+  if (ui.cpuCapturesLabel) ui.cpuCapturesLabel.textContent = topCapturesText;
+  if (ui.playerCapturesLabel) ui.playerCapturesLabel.textContent = bottomCapturesText;
+  if (ui.summaryColYou) ui.summaryColYou.textContent = getSummaryColumnLabel(0);
+  if (ui.summaryColCpu) ui.summaryColCpu.textContent = getSummaryColumnLabel(1);
+  if (ui.cpuScoreInline) ui.cpuScoreInline.textContent = String(state.players[topPlayerIndex].score);
+  if (ui.playerScoreInline) ui.playerScoreInline.textContent = String(state.players[bottomPlayerIndex].score);
   if (ui.gameSummaryToggle) ui.gameSummaryToggle.textContent = `Game ${state.gameNumber} / ${state.maxGames}`;
   if (ui.turnMeta) {
     const turnText = state.roundOver ? "round ended" : state.players[state.currentPlayer].name;
     ui.turnMeta.textContent = `Starts: ${state.players[state.dealer].name} | Turn: ${turnText}`;
   }
 
-  ui.cpuHandCount.textContent = `${state.players[1].hand.length} cards`;
+  ui.cpuHandCount.textContent = `${state.players[topPlayerIndex].hand.length} cards`;
   ui.deckCount.textContent = `Deck: ${state.drawPile.length}`;
 
-  ui.cpuCapturedCount.textContent = String(state.players[1].captured.length);
-  ui.playerCapturedCount.textContent = String(state.players[0].captured.length);
+  ui.cpuCapturedCount.textContent = String(state.players[topPlayerIndex].captured.length);
+  ui.playerCapturedCount.textContent = String(state.players[bottomPlayerIndex].captured.length);
 
-  ui.cpuYaku.textContent = formatYakuLine(state.players[1].yaku);
-  ui.playerYaku.textContent = formatYakuLine(state.players[0].yaku);
+  ui.cpuYaku.textContent = formatYakuLine(state.players[topPlayerIndex].yaku);
+  ui.playerYaku.textContent = formatYakuLine(state.players[bottomPlayerIndex].yaku);
 
   const callerLabel = state.lastKoiCaller === null ? "none" : state.players[state.lastKoiCaller].name;
   ui.koiState.textContent = `Table ${state.tableMultiplier}x | Last Koi-Koi: ${callerLabel}`;
@@ -2903,19 +3495,24 @@ function renderBadgedCardContent(card) {
 }
 
 function renderHands() {
-  const cpuHand = state.players[1].hand;
-  const previewId = state.cpuPhase1PreviewCardId;
-  let displayHand = cpuHand;
+  const topPlayerIndex = getDisplayTopPlayerIndex();
+  const bottomPlayerIndex = getDisplayBottomPlayerIndex();
+  const topHand = state.players[topPlayerIndex].hand;
+  const canRevealBottom = canRevealBottomHand();
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+
+  const previewId = !isFriendMode() && topPlayerIndex === 1 ? state.cpuPhase1PreviewCardId : null;
+  let displayTopHand = topHand;
   if (previewId) {
-    const previewIdx = cpuHand.findIndex((card) => card.id === previewId);
+    const previewIdx = topHand.findIndex((card) => card.id === previewId);
     if (previewIdx > 0) {
-      const previewCard = cpuHand[previewIdx];
-      displayHand = [previewCard, ...cpuHand.slice(0, previewIdx), ...cpuHand.slice(previewIdx + 1)];
+      const previewCard = topHand[previewIdx];
+      displayTopHand = [previewCard, ...topHand.slice(0, previewIdx), ...topHand.slice(previewIdx + 1)];
     }
   }
   ui.cpuHand.innerHTML = Array.from({ length: 8 }, (_, i) => {
-    if (i < displayHand.length) {
-      const card = displayHand[i];
+    if (i < displayTopHand.length) {
+      const card = displayTopHand[i];
       const isRevealed = previewId === card.id;
       if (isRevealed) {
         return `<div class="card badged cpu-revealed" data-card-type="${card.type}">${renderBadgedCardContent(card)}</div>`;
@@ -2926,31 +3523,46 @@ function renderHands() {
   }).join("");
 
   const pending = state.pendingSelection;
-  const inChoiceMode = Boolean(pending && pending.playerIndex === 0);
-  const handPreviewPending =
+  const pendingForBottom =
     Boolean(pending) &&
-    pending.playerIndex === 0 &&
+    pending.playerIndex === bottomPlayerIndex;
+  const inChoiceMode = pendingForBottom;
+  const handPreviewPending =
+    pendingForBottom &&
     (pending.type === "handMatch" || pending.type === "handPlace");
   const waitingDeckFlip =
     Boolean(state.awaitingDeckFlip) &&
-    state.awaitingDeckFlip.playerIndex === 0 &&
+    state.awaitingDeckFlip.playerIndex === bottomPlayerIndex &&
     !state.awaitingDeckFlip.revealed;
-  const inputLocked = waitingDeckFlip || (inChoiceMode && !handPreviewPending);
+  const inputLocked = !canRevealBottom || waitingDeckFlip || (inChoiceMode && !handPreviewPending);
   const selectable =
-    state.currentPlayer === 0 &&
+    canRevealBottom &&
+    interactivePlayerIndex !== null &&
+    interactivePlayerIndex === bottomPlayerIndex &&
     !state.roundOver &&
     !state.awaitingDecision &&
     !waitingDeckFlip &&
-    (!state.pendingSelection || handPreviewPending);
+    (!pending || handPreviewPending);
   if (ui.playerZone) {
     ui.playerZone.classList.toggle("turn-ready", selectable);
   }
   ui.playerHand.classList.toggle("locked", inputLocked);
 
-  ui.playerHand.innerHTML = state.players[0].hand
+  const bottomHand = state.players[bottomPlayerIndex].hand;
+  if (!canRevealBottom) {
+    ui.playerHand.innerHTML = Array.from({ length: 8 }, (_, i) => {
+      if (i < bottomHand.length) {
+        return `<div class="card-back"></div>`;
+      }
+      return `<div class="card-back empty"></div>`;
+    }).join("");
+    return;
+  }
+
+  ui.playerHand.innerHTML = bottomHand
     .map((card) => {
       const isPending =
-        pending &&
+        pendingForBottom &&
         (pending.type === "handMatch" || pending.type === "handPlace") &&
         pending.cardId === card.id;
       const classes = ["card", "badged"];
@@ -2963,8 +3575,9 @@ function renderHands() {
 }
 
 function renderField() {
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
   const pending =
-    state.pendingSelection && state.pendingSelection.playerIndex === 0
+    state.pendingSelection && interactivePlayerIndex !== null && state.pendingSelection.playerIndex === interactivePlayerIndex
       ? state.pendingSelection
       : null;
   const aiPreview = !pending && state.aiPreview ? state.aiPreview : null;
@@ -2973,7 +3586,7 @@ function renderField() {
   const humanSelectable = Boolean(pending);
   const previewPlacementCard =
     pending && pending.type === "handPlace"
-      ? state.players[0].hand.find((entry) => entry.id === pending.cardId) || CARD_BY_ID.get(pending.cardId) || null
+      ? state.players[pending.playerIndex].hand.find((entry) => entry.id === pending.cardId) || CARD_BY_ID.get(pending.cardId) || null
       : null;
   const fieldEntries = state.field.map((card) => ({ card, isPreviewPlacement: false }));
   if (previewPlacementCard) {
@@ -3123,27 +3736,35 @@ function getChoicePromptText(pending) {
 }
 
 function renderChoiceMode() {
-  const pending = state.pendingSelection && state.pendingSelection.playerIndex === 0 ? state.pendingSelection : null;
+  const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
+  const pending =
+    state.pendingSelection &&
+    interactivePlayerIndex !== null &&
+    state.pendingSelection.playerIndex === interactivePlayerIndex
+      ? state.pendingSelection
+      : null;
   const aiPreview = !pending && state.aiPreview ? state.aiPreview : null;
   const waitingDeckFlip =
     Boolean(state.awaitingDeckFlip) &&
-    state.awaitingDeckFlip.playerIndex === 0 &&
+    interactivePlayerIndex !== null &&
+    state.awaitingDeckFlip.playerIndex === interactivePlayerIndex &&
     !state.awaitingDeckFlip.revealed;
   const canPickHandCard =
-    state.currentPlayer === 0 &&
+    interactivePlayerIndex !== null &&
     !state.roundOver &&
     !state.awaitingDecision &&
     !state.pendingSelection &&
     !state.awaitingDeckFlip &&
-    state.players[0].hand.length > 0;
+    state.players[interactivePlayerIndex].hand.length > 0;
   const humanDecision =
     Boolean(state.awaitingDecision) &&
     state.awaitingDecision.kind === "stopOrKoi" &&
-    state.awaitingDecision.playerIndex === 0;
+    interactivePlayerIndex !== null &&
+    state.awaitingDecision.playerIndex === interactivePlayerIndex;
   const roundEndedWaitingNext = state.roundOver && !state.matchOver;
   const matchEndedWaitingNew = state.matchOver;
   const cpuPlaying =
-    state.currentPlayer === 1 &&
+    !state.players[state.currentPlayer].isHuman &&
     !state.roundOver &&
     !state.awaitingDecision;
   const active = Boolean(pending || aiPreview);
@@ -3167,21 +3788,24 @@ function renderChoiceMode() {
       activeNote = true;
     } else if (roundEndedWaitingNext) {
       let winnerText = "Round over.";
-      const scoredMatch = state.message.match(/^(You|CPU) scores .* = (\d+)/);
-      if (scoredMatch) {
-        winnerText = `${scoredMatch[1]} win ${scoredMatch[2]}.`;
-      } else if (state.message.includes("No scorer this round")) {
+      const outcome = getLatestRoundOutcome();
+      if (outcome?.noScore) {
         winnerText = "No scorer this round.";
+      } else if (outcome?.winnerIndex !== null) {
+        const winnerName = state.players[outcome.winnerIndex]?.name || `P${outcome.winnerIndex + 1}`;
+        winnerText = `${winnerName} wins ${outcome.points}.`;
       }
       noteText = `${winnerText} Click Next Game.`;
       activeNote = true;
     } else if (matchEndedWaitingNew) {
       const p0 = state.players[0].score;
       const p1 = state.players[1].score;
+      const p0Name = state.players[0]?.name || "P1";
+      const p1Name = state.players[1]?.name || "P2";
       if (p0 > p1) {
-        noteText = `You win ${p0}-${p1}. Click New Match.`;
+        noteText = `${p0Name} wins ${p0}-${p1}. Click New Match.`;
       } else if (p1 > p0) {
-        noteText = `CPU wins ${p1}-${p0}. Click New Match.`;
+        noteText = `${p1Name} wins ${p1}-${p0}. Click New Match.`;
       } else {
         noteText = `Draw ${p0}-${p1}. Click New Match.`;
       }
@@ -3190,7 +3814,7 @@ function renderChoiceMode() {
       noteText = "Pick a card from your hand to play.";
       activeNote = true;
     } else if (cpuPlaying) {
-      noteText = "CPU playing.";
+      noteText = `${state.players[state.currentPlayer].name} playing.`;
       activeNote = false;
     } else {
       noteText = "";
@@ -3206,8 +3830,10 @@ function renderChoiceMode() {
 }
 
 function renderCaptured() {
-  const cpuCaptured = getSortedCapturedForDisplay(state.players[1].captured);
-  const playerCaptured = getSortedCapturedForDisplay(state.players[0].captured);
+  const topPlayerIndex = getDisplayTopPlayerIndex();
+  const bottomPlayerIndex = getDisplayBottomPlayerIndex();
+  const cpuCaptured = getSortedCapturedForDisplay(state.players[topPlayerIndex].captured);
+  const playerCaptured = getSortedCapturedForDisplay(state.players[bottomPlayerIndex].captured);
 
   ui.cpuCaptured.innerHTML = cpuCaptured
     .map(
@@ -3389,8 +4015,20 @@ function renderGameToText() {
         }
       : null,
   };
+  const viewerIndex = getViewerPlayerIndex();
+  const topPlayerIndex = getDisplayTopPlayerIndex();
+  const bottomPlayerIndex = getDisplayBottomPlayerIndex();
+  const canRevealBottom = canRevealBottomHand();
+  const bottomHandOut = canRevealBottom
+    ? state.players[bottomPlayerIndex].hand.map((card) => card.id)
+    : Array.from({ length: state.players[bottomPlayerIndex].hand.length }, () => "hidden");
+
   const payload = {
     mode: state.matchOver ? "match-over" : state.roundOver ? "round-over" : state.awaitingDecision ? "decision" : "playing",
+    play_mode: state.playMode,
+    friend_flow: state.friendFlow,
+    viewer_player_index: state.viewerPlayerIndex,
+    turn_checkpoint_ready: state.turnCheckpointReady,
     coordinate_system: "Cards are listed left-to-right in each visible area.",
     game_number: state.gameNumber,
     round_month: describeMonth(state.gameNumber),
@@ -3403,7 +4041,7 @@ function renderGameToText() {
       state.roundLeaderAtStart === null ? null : state.players[state.roundLeaderAtStart].name,
     deck_count: state.drawPile.length,
     pending_selection:
-      state.pendingSelection && state.pendingSelection.playerIndex === 0
+      state.pendingSelection && state.pendingSelection.playerIndex === getDisplayBottomPlayerIndex()
         ? {
             type: state.pendingSelection.type,
             options: state.pendingSelection.options,
@@ -3427,19 +4065,25 @@ function renderGameToText() {
       : null,
     cpu_phase1_preview: state.cpuPhase1PreviewCardId,
     field: state.field.map((card) => card.id),
+    hand_visibility: {
+      viewer_player_index: viewerIndex,
+      top_player_index: topPlayerIndex,
+      bottom_player_index: bottomPlayerIndex,
+      bottom_visible: canRevealBottom,
+    },
     player: {
-      score: state.players[0].score,
-      hand: state.players[0].hand.map((card) => card.id),
-      captured_count: state.players[0].captured.length,
-      yaku_points: state.players[0].yaku.points,
-      yaku_names: state.players[0].yaku.names,
+      score: state.players[bottomPlayerIndex].score,
+      hand: bottomHandOut,
+      captured_count: state.players[bottomPlayerIndex].captured.length,
+      yaku_points: state.players[bottomPlayerIndex].yaku.points,
+      yaku_names: state.players[bottomPlayerIndex].yaku.names,
     },
     cpu: {
-      score: state.players[1].score,
-      hand_count: state.players[1].hand.length,
-      captured_count: state.players[1].captured.length,
-      yaku_points: state.players[1].yaku.points,
-      yaku_names: state.players[1].yaku.names,
+      score: state.players[topPlayerIndex].score,
+      hand_count: state.players[topPlayerIndex].hand.length,
+      captured_count: state.players[topPlayerIndex].captured.length,
+      yaku_points: state.players[topPlayerIndex].yaku.points,
+      yaku_names: state.players[topPlayerIndex].yaku.names,
       profile: cpuProfile.name,
     },
     context,
