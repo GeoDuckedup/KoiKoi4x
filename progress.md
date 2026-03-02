@@ -210,3 +210,277 @@ Original prompt: Get rid of need for manuals folder. Go through the code and mak
   - Switching to a different hand card during preview still works as before.
 - Updated hand-match instruction copy to include explicit cancel guidance and 3-match sweep wording.
 - Smoke check: local server served `index.html` and `game.js` with HTTP 200 on port 5185.
+- Phase 1 (multiplayer groundwork) implemented with no gameplay-flow switch yet.
+- Save/version layer:
+  - Save prefix/version bumped to `HKK3` / `v3` for new exports.
+  - Backward loader now accepts `HKK2` and `HKK3` via prefix->version map.
+  - Added strict prefix/version pairing check (`Version mismatch for <prefix>`).
+- New multiplayer-ready state fields added:
+  - `playMode`, `friendFlow`, `viewerPlayerIndex`, `interstitial`, `turnCheckpointReady`, `lastExportMeta`.
+- Snapshot schema expanded for `v3` only:
+  - serializes/deserializes/validates new multiplayer-ready fields.
+  - `v2` snapshots skip these new checks and load with safe defaults.
+- Player model expanded:
+  - `createPlayer(name, isHuman, roleLabel)` now supports `roleLabel` for upcoming friend-mode labeling.
+  - Snapshot player entries now include optional `name`, `roleLabel`, `isHuman`.
+- Applied safe defaults for new fields on:
+  - `startNewMatch()` and `startRound()`.
+  - `applySnapshot()` when loading legacy `HKK2` snapshots.
+- Added `computeTurnCheckpointReady()` and wired it into render/export so checkpoint metadata is computed from live state.
+- Added multiplayer metadata to `render_game_to_text` payload for test/debug visibility.
+- Smoke check: local HTTP server returned 200 for `index.html` and updated `game.js` on port 5185.
+- Test limitation: could not run Playwright scripted smoke in this environment because `npx` is unavailable.
+- Step 2 implemented: start-menu mode selection + friend flow selection wiring.
+- Start menu UI changed:
+  - Replaced single `New Game` with `Play with CPU` and `Play with Friend`.
+  - Added friend sub-flow chooser (hidden by default):
+    - `Hotseat (Same Phone)`
+    - `Code-Send (Two Devices)`.
+- Added start-menu UI ids and handlers:
+  - `start-mode-cpu-btn`, `start-mode-friend-btn`, `start-friend-flow`, `start-friend-hotseat-btn`, `start-friend-code-btn`.
+  - New handlers: `onStartModeCpuFromMenu`, `onStartModeFriendFromMenu`, `onStartFriendHotseatFromMenu`, `onStartFriendCodeFromMenu`.
+  - Added `setStartFriendFlowOpen()` and reset it in `showStartMenu()`/`hideStartMenu()`.
+- `startNewMatch(options)` now supports mode args:
+  - `{ playMode: "cpu" }` starts current CPU behavior.
+  - `{ playMode: "friend", friendFlow: "hotseat"|"code" }` initializes two-human players (`Player 1`, `Player 2`) and sets friend state fields.
+  - Default behavior with no args now uses existing `state.playMode/state.friendFlow` so New Match can preserve mode in future flows.
+- CSS additions for new start menu layout:
+  - `.start-mode-actions`, `.start-friend-flow`, `.start-subtitle`.
+- Smoke check:
+  - local HTTP server returned 200 for `index.html`, `style.css`, and `game.js` on port 5185.
+- Test limitation:
+  - Playwright smoke test not run here because `npx` is unavailable.
+- Fixed start-menu friend-mode submenu glitch:
+  - Added `.start-friend-flow[hidden] { display: none !important; }` so hidden state is respected.
+  - Updated `onStartModeFriendFromMenu()` to toggle submenu open/closed instead of only forcing open.
+- Smoke check: index/js/css all served HTTP 200 on port 5185.
+- Step 3 (Visibility policy integration) implemented in render/input layer.
+- Added visibility/input policy helpers:
+  - `isFriendMode`, `getViewerPlayerIndex`, `getDisplayBottomPlayerIndex`, `getDisplayTopPlayerIndex`, `canRevealBottomHand`, `getInteractiveHumanPlayerIndex`.
+- Input flow now targets dynamic interactive human player (not hardcoded player 0):
+  - `onPlayerHandClick`, `previewPlayerHandCard`, `clearPlayerHandPreview`, `onFieldClick`, and `onDrawPreviewClick` updated.
+  - In friend mode, input is blocked unless `viewerPlayerIndex === currentPlayer`.
+- Render flow now uses viewer/opponent mapping:
+  - `renderTop`, `renderHands`, `renderField`, `renderChoiceMode`, `renderCaptured` updated to respect display indices.
+  - Opponent/top hand is always hidden (backs), bottom hand visibility controlled by `canRevealBottomHand()`.
+  - If bottom hand is not visible, it renders backs only and remains locked.
+- Focus/action targeting updated for dynamic interactive player in `getActiveActionFocusKey`.
+- `startRound()` now resets friend viewer to current turn owner (`viewerPlayerIndex = currentPlayer`) in friend mode.
+- `render_game_to_text` updated with visibility metadata and masked bottom hand output when hidden.
+- Safety fix for legacy/HKK2 load in CPU mode:
+  - `applySnapshot()` now defaults `viewerPlayerIndex` to `0` for CPU mode (prevents accidental CPU-hand reveal on loads where `currentPlayer===1`).
+- Smoke checks:
+  - Local HTTP server served `index.html` and updated `game.js` with HTTP 200 on port 5185.
+- Test limitation:
+  - Playwright smoke not run in this environment (`npx` unavailable).
+- Step 4 implemented: friend labels + text normalization across live HUD/status copy.
+- Dynamic label binding now updates hand/capture headers and round-summary column headers from player names (`Player 1/Player 2` in friend mode, `You/CPU` in cpu mode).
+- Added `getLatestRoundOutcome()` and switched round-end instruction text to derive from `roundHistory` state instead of hardcoded `You|CPU` regex matching.
+- Match-end instruction text now uses dynamic player names (`<name> wins ...`) and no longer assumes `You/CPU`.
+- CPU-turn muted note now uses current player name (`<name> playing.`), keeping copy mode-safe.
+- Decision prompt forced-koi line now uses owner name (`<name> is forced to Koi-Koi.`).
+- Smoke check: local server on port 5185 returned HTTP 200 for `/` and `/game.js`; verified updated markers in served JS (`getLatestRoundOutcome`, dynamic wins text).
+- Test limitation: Playwright scripted smoke still not run in this environment because `node`/`npx` are unavailable.
+- Step 5 implemented: friend-mode turn handoff flow (hotseat + code-send) with interstitial overlay.
+- Added new UI overlay (`#friend-interstitial`) with mode-aware content:
+  - Hotseat: privacy pass screen + ready/continue confirmation.
+  - Code-send: share screen with generated turn code + copy button + optional continue on same device.
+- Added friend interstitial state/render/event wiring:
+  - New UI bindings in `cacheUI()` and handlers in `bindUI()`.
+  - New helpers: `setFriendInterstitialOpen`, `prepareFriendTurnHandoff`, `onFriendInterstitialCopyCode`, `onFriendInterstitialContinue`, `setFriendInterstitialStatus`, `renderFriendInterstitial`.
+- Turn transition integration:
+  - `moveToNextPlayer()` now records friend handoff metadata (`lastExportMeta`) and opens interstitial in friend mode at end-of-turn handoff.
+  - CPU mode remains unchanged.
+- Code-send import behavior:
+  - In `applySnapshot()`, if loaded state is friend+code and interstitial is open, importer auto-claims next-player perspective and closes interstitial so play can continue immediately.
+- Checkpoint readiness update:
+  - `computeTurnCheckpointReady()` now returns false during hotseat interstitial lock state.
+- Menu behavior hardening:
+  - Opening/closing start menu now also closes friend interstitial state.
+- Smoke check:
+  - Local HTTP server on 5185 returned 200 for `/`, `/style.css`, `/game.js`.
+  - Verified new HTML/JS/CSS markers for friend interstitial and handoff functions.
+- Test limitation:
+  - Playwright scripted smoke still not run in this environment (`node`/`npx` unavailable).
+- Step 6 implemented: friend code-share UX normalization + turn-code guardrails.
+- Code panel now has dynamic friend-code labeling:
+  - Header: `Turn Code` (friend code mode) vs `Save / Load Code` (default).
+  - Export label: `Current turn code`.
+  - Import label/placeholder: `Load turn code` / `Paste turn code from other player`.
+  - Buttons: `Generate Turn Code` and `Copy Turn Code` in friend code mode.
+- Added mode guards for friend code flow:
+  - `Refresh` and `Copy` actions are blocked unless in handoff/export window (`isFriendTurnExportWindow()`).
+  - Clear status messages explain why actions are disabled before handoff.
+- Added helpers:
+  - `isFriendCodeMode()`
+  - `isFriendTurnExportWindow()`
+  - `renderCodePanel()` (called in `renderAll` for live button text/disabled state).
+- Added code-panel DOM ids for dynamic text updates:
+  - `#code-panel-head`, `#export-code-label`, `#import-code-label`.
+- Smoke check:
+  - Local server on 5185 returned HTTP 200 for `/` and `/game.js`.
+  - Verified HTML ids and JS markers for new phase-6 functions/messages are present in served output.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` not present).
+- Step 7 implemented: friend code-turn checkpoint enforcement + stronger import/export guardrails.
+- Turn-code import now validates checkpoint state:
+  - In `loadCodeIntoGame()`, friend code snapshots are rejected unless `turnCheckpointReady === true`.
+  - Error shown: `This turn code is not at a valid handoff checkpoint`.
+- Friend code load success messaging now includes exporter metadata when available:
+  - `Turn code loaded (Player X, move N).`
+- `computeTurnCheckpointReady()` semantics tightened:
+  - In friend code mode, checkpoint is true only while interstitial handoff is open.
+  - Prevents non-handoff states from being treated as valid turn export checkpoints.
+- UI guard hardening for export textarea:
+  - While in friend code mode outside handoff window, export textarea is cleared.
+  - Placeholder now explains: `Turn code appears after a full turn handoff.`
+  - Prevents easy manual copy from prefilled textarea before a full-turn checkpoint.
+- Interstitial text now includes move metadata from `lastExportMeta` when present (e.g., `Player 1 move 3`).
+- Smoke check:
+  - Local server on 5185 returned HTTP 200 for `/` and `/game.js`.
+  - Verified served markers for checkpoint validation, updated status copy, and export textarea guard.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` missing).
+- Share-link UX update implemented for multiplayer handoff + save/load.
+- Code panel is now link-first:
+  - Added `Copy Turn Link` action.
+  - Added `Advanced` toggle that reveals raw-code textarea/actions only when needed.
+  - Import copy now reads `Load from link or code` with link/code parsing on load.
+- Start-menu and friend-handoff copy updated to link-first language (`Enter Link or Code`, `Copy Turn Link`, `Load Turn Link`).
+- Added robust link/code parsing + generation helpers:
+  - `buildShareLinkFromCode(code)` for `#t=` links.
+  - `extractCodeFromInput(raw)` accepts raw `HKK...`, `#t=...`, full URL hash/query token forms.
+  - `tryLoadFromLocationHash()` supports direct-open handoff links and clears hash after successful load.
+- Friend interstitial copy now exports link text (not raw code) while retaining strict checkpoint validation.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/`, `/game.js`, `/style.css` all HTTP 200.
+  - Verified markers for `copy-link-btn`, `toggle-advanced-btn`, `code-advanced`,
+    `buildShareLinkFromCode`, `extractCodeFromInput`, and `tryLoadFromLocationHash`.
+- UX cleanup pass for turn-link loading implemented (clipboard-first, less clutter).
+- Start menu now defaults to simple actions:
+  - `Load Turn Link` attempts clipboard auto-load first.
+  - Manual paste area is hidden by default and only revealed when clipboard is unavailable/empty or invalid.
+  - Added fallback controls: `#start-manual-load-wrap`, `#start-load-manual-btn`.
+- Friend interstitial now defaults to clean handoff controls:
+  - Removed visible turn-link dump textarea from normal flow.
+  - `Load Turn Link` is clipboard-first; manual paste section appears only on failure.
+  - Added fallback controls: `#friend-manual-load-wrap`, `#friend-load-manual-btn`.
+- Added JS helpers for smart loading:
+  - `readClipboardTextSafe()`
+  - `tryLoadFromClipboardOrManual(target)`
+  - visibility toggles `setStartManualLoadVisible()` / `setFriendManualLoadVisible()`.
+- Friend copy-link flow no longer depends on rendering a visible textarea; fallback copy uses a temporary hidden textarea only when needed.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified new marker ids for manual fallback wrappers/buttons.
+  - Verified old interstitial turn-link dump marker is absent from served HTML.
+- Multiplayer autoplay bugfix (friend link-import handoff):
+  - Root cause: post-load resume logic used hardcoded AI index `1`, which collides with friend mode where Player 2 is also index `1`.
+  - Added `getCpuPlayerIndex()` and switched AI resume/scheduling to target the actual non-human player only.
+  - Updated `resumeLoadedStateFlow`, `resolveCpuPendingDecision`, `resumeCpuDeckFlipFlow`, `queueAITurn`, and `performAITurn` to use CPU index discovery instead of `=== 1` assumptions.
+  - Updated phase-1 CPU preview cleanup in `executePlayFromHand()` to clear by actual CPU index.
+- Friend import safety hardening:
+  - When loading from the friend interstitial (`target="friend"`), non-friend snapshots now fail fast with `This is not a friend turn link`.
+  - On snapshot hydrate, friend mode now forces both players to `isHuman=true` to prevent unintended AI scheduling from malformed/tampered payloads.
+- Implemented lightweight friend handoff "Turn Recap Playback" (visual narration, not deterministic simulation).
+- New recap state added:
+  - `activeTurnRecap` (in-progress turn summary),
+  - `lastTurnRecap` (serialized handoff summary),
+  - `turnReplay` (playback runtime: active/note/timer/key).
+- Turn recap capture now records:
+  - phase-1 played card + hand result (capture/place/sweep),
+  - draw card + draw result (capture/place/sweep/deck-empty),
+  - pass/koi decision + multiplier transition.
+- Handoff integration:
+  - on turn handoff (`moveToNextPlayer`), recap is committed for export/import.
+  - on friend hotseat continue and friend link import, receiver gets staged recap playback.
+- Playback behavior:
+  - drives `Recent Deck Pull` visuals + instruction bar text over short timed beats,
+  - locks input while replay is active (`getInteractiveHumanPlayerIndex` returns null),
+  - auto-focuses draw preview during replay and then returns to normal state.
+- Save payload integration:
+  - `lastTurnRecap` included in snapshot and validated/hydrated.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified markers for recap capture/playback functions and friend handoff hooks in served JS.
+- Phase-2 human no-match flow updated to require field confirmation click (parity with phase-1 no-match placement UX).
+- Added new pending selection mode: `drawPlace`.
+  - On human draw reveal with no match, card is now staged as preview on field.
+  - Player must tap highlighted preview field card to place and continue.
+- Added `resolveDrawPlace(...)` and wired `onFieldClick(...)` for `drawPlace`.
+- Extended save/load support for `drawPlace`:
+  - serialize/validate/hydrate pending selection now handles `drawPlace`.
+  - hydrated ownership checks now allow `drawPlace` preview option to reference the drawn card (not field card).
+- Updated field render + instruction copy to show draw placement preview and explicit prompt text.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified served JS markers for `drawPlace` and `resolveDrawPlace` flow.
+- Multiplayer recap readability pass:
+  - During replay, draw panel header now switches from `Recent Deck Pull` to `Player X Recap`.
+  - Recap pacing slowed (`TURN_REPLAY_STEP_MS` increased to 1500ms) for easier reading.
+  - Added recap-only flashing visual treatment on recent-card panel (`.draw-preview.recap-active`) with `recapFlash` keyframes.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified markers for `draw-preview-label`, recap label toggle in JS, updated replay timing constant, and recap flash CSS.
+- Recap sequencing updated to explicit staged beats per turn (friend multiplayer handoff).
+- Replaced old single-summary replay line with structured `buildTurnRecapSteps(...)` flow:
+  - phase 1 hand pick (`selected ... from hand`)
+  - phase 1 result (capture/sweep/place)
+  - phase 2 deck pull (`drew ... from deck`)
+  - phase 2 result (capture/sweep/place/deck-empty)
+  - optional pass/koi decision beat using last turn card as visual anchor
+  - final `Your turn.` step
+- This preserves the existing recap location and visuals while making each action legible in order.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified served JS markers for `buildTurnRecapSteps` and staged recap step text.
+- Recap navigation changed to hybrid mode:
+  - auto-advance every `2600ms` (`TURN_REPLAY_STEP_MS = 2600`)
+  - tap-to-advance enabled on the recap panel during replay
+  - tap guard added (`TURN_REPLAY_TAP_GUARD_MS = 220`) to avoid accidental double-skip
+- Recap step copy now includes inline guidance:
+  - intermediate steps: `Tap to continue (n/total).`
+  - final step: `Tap to start your turn.`
+- Implemented shared replay step runner `advanceTurnReplayStep(...)` so timer and tap use the same progression logic.
+- Smoke check (escalated local bind) passed on port 5185:
+  - `/` served HTTP 200.
+  - Verified served JS markers for hybrid recap constants and step runner.
+- Step 8 implemented: strict friend code-turn import invariants.
+- Added `validateFriendCodeSnapshotForImport(snapshot)` and applied it in `loadCodeIntoGame()` before hydration.
+- Friend code imports now require all of the following:
+  - `playMode === friend` and `friendFlow === code` snapshots must be at handoff checkpoint (`turnCheckpointReady === true`).
+  - `interstitial.open === true` with a valid `nextPlayerIndex`.
+  - `currentPlayer` must match `interstitial.nextPlayerIndex`.
+  - `lastExportMeta` must exist with valid exporter index and positive turn number.
+  - exporter must differ from receiver (`nextPlayerIndex`).
+- This closes remaining loopholes where malformed/non-handoff friend snapshots could still be loaded.
+- Smoke check:
+  - Local server on 5185 returned HTTP 200 for `/` and `/game.js`.
+  - Verified served JS markers for `validateFriendCodeSnapshotForImport` and new invariant error strings.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` missing).
+- Unified friend mode update implemented (merged former hotseat/code branches into one flow).
+- Start menu now has one `Play with Friend` action (no friend sub-mode chooser).
+- Friend interstitial now always supports both handoff paths:
+  - local pass-device (`<Next Player> Ready`)
+  - async code-send (`Copy Turn Code`)
+  - plus in-panel import (`Load Turn Code`) via new `#friend-import-code` and `#friend-load-code-btn`.
+- Added interstitial import handler:
+  - `onFriendInterstitialLoadCode()` calls `loadCodeIntoGame(..., "friend")`.
+  - `setCodeStatus()` now supports `target="friend"` so load/copy errors render in interstitial status area.
+- Normalized friend flow state:
+  - Default `state.friendFlow` is now `hybrid`.
+  - `normalizeFriendFlow()` maps legacy `hotseat`/`code`/`hybrid` to runtime `hybrid`.
+  - `validateFriendFlow()` now accepts `hotseat`, `code`, and `hybrid` for backward compatibility.
+- Snapshot apply behavior updated:
+  - Friend snapshots with open interstitial now auto-claim next player perspective regardless of legacy flow value.
+- Turn checkpoint logic unified:
+  - `computeTurnCheckpointReady()` now uses `interstitial.open` for all friend mode.
+- Friend import strictness retained and broadened:
+  - strict handoff validation now applies to all friend snapshots (not just legacy `friendFlow===code`).
+- Removed obsolete friend subflow CSS blocks from `style.css`.
+- Smoke checks:
+  - local HTTP server returned 200 for `/`, `/game.js`, and `/style.css`.
+  - verified new friend interstitial import ids/events and absence of stale `start-friend-flow` CSS selectors in served assets.
+- Test limitation:
+  - Playwright scripted smoke still unavailable in this environment (`node`/`npx` missing).

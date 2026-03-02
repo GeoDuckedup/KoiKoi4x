@@ -350,7 +350,8 @@ const AI_STEP_CPU_PHASE1_PREVIEW_MS = 520;
 const AI_STEP_TARGET_MS = 340;
 const AI_STEP_DRAW_RESOLVE_MS = 360;
 const AI_STEP_DECISION_MS = 420;
-const TURN_REPLAY_STEP_MS = 900;
+const TURN_REPLAY_STEP_MS = 2600;
+const TURN_REPLAY_TAP_GUARD_MS = 220;
 const SAVE_CODE_PREFIX = "HKK3";
 const SAVE_CODE_VERSION = 3;
 const SAVE_CODE_PREFIX_VERSION = {
@@ -416,6 +417,9 @@ const state = {
     note: "",
     timer: null,
     key: null,
+    steps: [],
+    index: 0,
+    lastStepAt: 0,
   },
   manualLoadFallback: {
     start: false,
@@ -501,6 +505,7 @@ function cacheUI() {
   ui.field = document.getElementById("field");
   ui.drawPreviewCanvas = document.getElementById("draw-preview-canvas");
   ui.drawPreviewText = document.getElementById("draw-preview-text");
+  ui.drawPreviewLabel = document.getElementById("draw-preview-label");
   ui.drawPreview = document.getElementById("draw-preview");
   ui.playerZone = document.getElementById("player-zone");
   ui.fieldZone = document.getElementById("field-zone");
@@ -1952,42 +1957,98 @@ function clearTurnRecapState() {
   state.turnReplay.key = null;
 }
 
-function describeRecapStep(step) {
-  if (!step) return "";
-  const actorName = state.players[step.actorIndex]?.name || `Player ${step.actorIndex + 1}`;
-  const played = step.playedCardId ? CARD_BY_ID.get(step.playedCardId) : null;
-  const drawn = step.drawnCardId ? CARD_BY_ID.get(step.drawnCardId) : null;
-  const parts = [];
+function buildTurnRecapSteps(recap) {
+  if (!recap) return [];
+  const actorName = state.players[recap.actorIndex]?.name || `Player ${recap.actorIndex + 1}`;
+  const played = recap.playedCardId ? CARD_BY_ID.get(recap.playedCardId) : null;
+  const drawn = recap.drawnCardId ? CARD_BY_ID.get(recap.drawnCardId) : null;
+  const steps = [];
+
   if (played) {
-    parts.push(`${actorName} played ${played.name}.`);
+    steps.push({
+      note: `${actorName} selected ${played.name} from hand.`,
+      cardId: played.id,
+    });
+
+    if (recap.handAction?.kind === "capture") {
+      const fieldCard = recap.handAction.fieldCardId ? CARD_BY_ID.get(recap.handAction.fieldCardId) : null;
+      steps.push({
+        note: fieldCard
+          ? `${played.name} matched ${fieldCard.name}. Captured.`
+          : `${played.name} matched and captured.`,
+        cardId: fieldCard?.id || played.id,
+      });
+    } else if (recap.handAction?.kind === "sweep") {
+      steps.push({
+        note: `${played.name} completed a 4-card month sweep.`,
+        cardId: played.id,
+      });
+    } else if (recap.handAction?.kind === "place") {
+      steps.push({
+        note: `${played.name} had no match and was placed on field.`,
+        cardId: played.id,
+      });
+    }
   }
-  if (step.handAction?.kind === "capture") {
-    const fieldCard = step.handAction.fieldCardId ? CARD_BY_ID.get(step.handAction.fieldCardId) : null;
-    parts.push(fieldCard ? `Captured ${fieldCard.name}.` : "Captured a matching card.");
-  } else if (step.handAction?.kind === "sweep") {
-    parts.push("Captured all four matching month cards.");
-  } else if (step.handAction?.kind === "place") {
-    parts.push("No match, landed on field.");
-  }
+
   if (drawn) {
-    parts.push(`Drew ${drawn.name}.`);
+    steps.push({
+      note: `${actorName} drew ${drawn.name} from deck.`,
+      cardId: drawn.id,
+    });
+
+    if (recap.drawAction?.kind === "capture") {
+      const fieldCard = recap.drawAction.fieldCardId ? CARD_BY_ID.get(recap.drawAction.fieldCardId) : null;
+      steps.push({
+        note: fieldCard
+          ? `${drawn.name} matched ${fieldCard.name}. Captured.`
+          : `${drawn.name} matched and captured.`,
+        cardId: fieldCard?.id || drawn.id,
+      });
+    } else if (recap.drawAction?.kind === "sweep") {
+      steps.push({
+        note: `${drawn.name} completed a 4-card month sweep.`,
+        cardId: drawn.id,
+      });
+    } else if (recap.drawAction?.kind === "place") {
+      steps.push({
+        note: `${drawn.name} had no match and was placed on field.`,
+        cardId: drawn.id,
+      });
+    } else if (recap.drawAction?.kind === "deck-empty") {
+      steps.push({
+        note: "Deck was empty on phase 2.",
+        cardId: played?.id || null,
+      });
+    }
+  } else if (recap.drawAction?.kind === "deck-empty") {
+    steps.push({
+      note: "Deck was empty on phase 2.",
+      cardId: played?.id || null,
+    });
   }
-  if (step.drawAction?.kind === "capture") {
-    const fieldCard = step.drawAction.fieldCardId ? CARD_BY_ID.get(step.drawAction.fieldCardId) : null;
-    parts.push(fieldCard ? `Matched ${fieldCard.name}.` : "Matched a field card.");
-  } else if (step.drawAction?.kind === "sweep") {
-    parts.push("Draw completed a 4-card sweep.");
-  } else if (step.drawAction?.kind === "place") {
-    parts.push("Draw had no match.");
-  } else if (step.drawAction?.kind === "deck-empty") {
-    parts.push("Deck was empty.");
+
+  if (recap.decision?.kind === "pass" || recap.decision?.kind === "koi") {
+    const decisionCardId = drawn?.id || played?.id || null;
+    if (recap.decision.kind === "pass") {
+      steps.push({
+        note: `${actorName} passed at ${recap.decision.multiplierAfter}x and ended the round.`,
+        cardId: decisionCardId,
+      });
+    } else {
+      steps.push({
+        note: `${actorName} called Koi-Koi. Table advanced to ${recap.decision.multiplierAfter}x.`,
+        cardId: decisionCardId,
+      });
+    }
   }
-  if (step.decision?.kind === "pass") {
-    parts.push(`Passed at ${step.decision.multiplierAfter}x.`);
-  } else if (step.decision?.kind === "koi") {
-    parts.push(`Called Koi-Koi to ${step.decision.multiplierAfter}x.`);
-  }
-  return parts.join(" ");
+
+  steps.push({
+    note: "Your turn.",
+    cardId: null,
+  });
+
+  return steps;
 }
 
 function stopTurnReplay(resetVisual = true) {
@@ -1997,12 +2058,54 @@ function stopTurnReplay(resetVisual = true) {
   state.turnReplay.timer = null;
   state.turnReplay.active = false;
   state.turnReplay.note = "";
+  state.turnReplay.steps = [];
+  state.turnReplay.index = 0;
+  state.turnReplay.lastStepAt = 0;
   if (resetVisual) {
     state.drawPreview = {
       cardId: null,
       text: "Waiting for draw.",
     };
   }
+}
+
+function advanceTurnReplayStep(fromTap = false) {
+  if (!state.turnReplay.active) return;
+  const steps = state.turnReplay.steps || [];
+  const idx = state.turnReplay.index || 0;
+  const step = steps[idx];
+
+  if (!step) {
+    stopTurnReplay(true);
+    renderAll();
+    return;
+  }
+
+  const total = steps.length;
+  const isFinal = idx === total - 1;
+  const progressText = isFinal ? "Tap to start your turn." : `Tap to continue (${idx + 1}/${total}).`;
+  const note = `${step.note} ${progressText}`.trim();
+
+  state.turnReplay.note = note;
+  state.drawPreview = {
+    cardId: step.cardId,
+    text: note,
+  };
+  state.turnReplay.index = idx + 1;
+  state.turnReplay.lastStepAt = Date.now();
+  renderAll();
+
+  if (state.turnReplay.timer) {
+    clearTimeout(state.turnReplay.timer);
+  }
+  if (isFinal && fromTap) {
+    stopTurnReplay(true);
+    renderAll();
+    return;
+  }
+  state.turnReplay.timer = setTimeout(() => {
+    advanceTurnReplayStep(false);
+  }, TURN_REPLAY_STEP_MS);
 }
 
 function playTurnRecapForViewer() {
@@ -2018,45 +2121,15 @@ function playTurnRecapForViewer() {
   state.turnReplay.key = key;
   state.turnReplay.active = true;
 
-  const steps = [];
-  const headline = describeRecapStep(recap);
-  if (headline) {
-    steps.push({
-      note: headline,
-      cardId: recap.playedCardId || null,
-    });
+  const steps = buildTurnRecapSteps(recap);
+  if (!steps.length) {
+    stopTurnReplay(true);
+    return;
   }
-  if (recap.drawnCardId) {
-    steps.push({
-      note: `${state.players[recap.actorIndex]?.name || `Player ${recap.actorIndex + 1}`} finished the turn.`,
-      cardId: recap.drawnCardId,
-    });
-  }
-  steps.push({
-    note: `Your turn.`,
-    cardId: null,
-  });
-
-  let idx = 0;
-  const runStep = () => {
-    if (!state.turnReplay.active) return;
-    const step = steps[idx];
-    if (!step) {
-      stopTurnReplay(true);
-      renderAll();
-      return;
-    }
-    state.turnReplay.note = step.note;
-    state.drawPreview = {
-      cardId: step.cardId,
-      text: step.note,
-    };
-    renderAll();
-    idx += 1;
-    state.turnReplay.timer = setTimeout(runStep, TURN_REPLAY_STEP_MS);
-  };
-
-  runStep();
+  state.turnReplay.steps = steps;
+  state.turnReplay.index = 0;
+  state.turnReplay.lastStepAt = 0;
+  advanceTurnReplayStep(false);
 }
 
 function startNewMatch(options = {}) {
@@ -2447,6 +2520,13 @@ function onFieldClick(event) {
 }
 
 function onDrawPreviewClick() {
+  if (state.turnReplay.active) {
+    const now = Date.now();
+    if (now - (state.turnReplay.lastStepAt || 0) < TURN_REPLAY_TAP_GUARD_MS) return;
+    advanceTurnReplayStep(true);
+    return;
+  }
+
   const interactivePlayerIndex = getInteractiveHumanPlayerIndex();
   if (interactivePlayerIndex === null) return;
   const flip = state.awaitingDeckFlip;
@@ -4107,6 +4187,14 @@ function renderDrawPreview() {
   if (!ui.drawPreviewCanvas || !ui.drawPreviewText) return;
   if (ui.drawPreview) {
     ui.drawPreview.classList.toggle("awaiting-flip", Boolean(state.awaitingDeckFlip && !state.awaitingDeckFlip.revealed));
+    ui.drawPreview.classList.toggle("recap-active", Boolean(state.turnReplay.active));
+  }
+  if (ui.drawPreviewLabel) {
+    if (state.turnReplay.active && state.lastTurnRecap) {
+      ui.drawPreviewLabel.textContent = `Player ${state.lastTurnRecap.actorIndex + 1} Recap`;
+    } else {
+      ui.drawPreviewLabel.textContent = "Recent Deck Pull";
+    }
   }
   ui.drawPreviewText.textContent = state.drawPreview.text;
   const ctx = ui.drawPreviewCanvas.getContext("2d");

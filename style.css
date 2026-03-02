@@ -337,6 +337,24 @@ button.ghost {
   font-weight: 800;
 }
 
+.draw-preview.recap-active {
+  border-color: #4d93da;
+  box-shadow: inset 0 0 0 2px rgba(77, 147, 218, 0.22);
+}
+
+.draw-preview.recap-active .draw-preview-card {
+  box-shadow: 0 0 0 2px rgba(77, 147, 218, 0.52), 0 0 14px rgba(56, 115, 177, 0.38);
+  animation: recapFlash 1.05s ease-in-out infinite;
+}
+
+.draw-preview.recap-active .draw-preview-label {
+  color: #1f4f80;
+}
+
+.draw-preview.recap-active .draw-preview-text {
+  color: #1f4064;
+}
+
 .draw-preview-label {
   font-size: 0.62rem;
   font-weight: 800;
@@ -368,6 +386,21 @@ button.ghost {
   font-weight: 700;
   color: #4f3720;
   text-align: center;
+}
+
+@keyframes recapFlash {
+  0% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
+  50% {
+    filter: brightness(1.13);
+    transform: translateY(-1px);
+  }
+  100% {
+    filter: brightness(1);
+    transform: translateY(0);
+  }
 }
 
 .card,
