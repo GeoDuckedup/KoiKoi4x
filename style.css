@@ -759,6 +759,20 @@ button.ghost {
   gap: 6px;
 }
 
+.code-advanced {
+  border: 1px solid #b49669;
+  background: #fdf2df;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.code-advanced[hidden] {
+  display: none !important;
+}
+
 .code-status {
   min-height: 18px;
   font-size: 0.72rem;
@@ -870,20 +884,6 @@ button.ghost {
 
 .start-mode-actions {
   grid-template-columns: 1fr 1fr;
-}
-
-.start-friend-flow {
-  border: 1px solid #b49669;
-  background: #fdf2df;
-  border-radius: 10px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.start-friend-flow[hidden] {
-  display: none !important;
 }
 
 .start-subtitle {

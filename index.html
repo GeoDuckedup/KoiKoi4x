@@ -106,17 +106,23 @@
 
       <section id="code-panel" class="code-panel" hidden>
         <div id="code-panel-head" class="code-panel-head">Save / Load Code</div>
-        <label id="export-code-label" class="code-label" for="export-code">Your current game code</label>
-        <textarea id="export-code" class="code-text" readonly></textarea>
         <div class="code-actions">
-          <button id="refresh-code-btn" type="button">Refresh Code</button>
-          <button id="copy-code-btn" type="button">Copy Code</button>
+          <button id="copy-link-btn" type="button">Copy Turn Link</button>
+          <button id="toggle-advanced-btn" type="button" class="ghost">Advanced</button>
         </div>
-        <label id="import-code-label" class="code-label" for="import-code">Load from code</label>
-        <textarea id="import-code" class="code-text" placeholder="Paste a code here"></textarea>
+        <label id="import-code-label" class="code-label" for="import-code">Load from link or code</label>
+        <textarea id="import-code" class="code-text" placeholder="Paste a link or code here"></textarea>
         <div class="code-actions">
-          <button id="load-code-btn" type="button">Load Code</button>
+          <button id="load-code-btn" type="button">Load</button>
           <button id="close-code-btn" type="button" class="ghost">Back to Menu</button>
+        </div>
+        <div id="code-advanced" class="code-advanced" hidden>
+          <label id="export-code-label" class="code-label" for="export-code">Current raw code</label>
+          <textarea id="export-code" class="code-text" readonly></textarea>
+          <div class="code-actions">
+            <button id="refresh-code-btn" type="button">Refresh Raw Code</button>
+            <button id="copy-code-btn" type="button">Copy Raw Code</button>
+          </div>
         </div>
         <div id="code-status" class="code-status"></div>
       </section>
@@ -247,22 +253,16 @@
     <section id="start-menu" class="start-menu">
       <div class="start-card">
         <h2>Hanafuda Koi-Koi</h2>
-        <p>Choose how you want to play, or load from a code.</p>
+        <p>Choose how you want to play, or load from a link or code.</p>
         <div class="start-actions start-mode-actions">
           <button id="start-mode-cpu-btn" type="button" class="primary">Play with CPU</button>
           <button id="start-mode-friend-btn" type="button">Play with Friend</button>
         </div>
-        <div id="start-friend-flow" class="start-friend-flow" hidden>
-          <div class="start-subtitle">Friend mode format</div>
-          <div class="start-actions">
-            <button id="start-friend-hotseat-btn" type="button">Hotseat (Same Phone)</button>
-            <button id="start-friend-code-btn" type="button">Code-Send (Two Devices)</button>
-          </div>
-        </div>
-        <label class="code-label" for="start-import-code">Enter Code</label>
-        <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share code here"></textarea>
+        <div class="start-subtitle">Friend mode supports both pass-device and turn-code handoff each turn.</div>
+        <label class="code-label" for="start-import-code">Enter Link or Code</label>
+        <textarea id="start-import-code" class="code-text" placeholder="Paste a save/share link or code here"></textarea>
         <div class="start-actions">
-          <button id="start-load-btn" type="button">Load From Code</button>
+          <button id="start-load-btn" type="button">Load</button>
         </div>
         <div id="start-menu-status" class="code-status"></div>
       </div>
@@ -270,15 +270,20 @@
 
     <section id="friend-interstitial" class="friend-interstitial" hidden>
       <div class="friend-interstitial-card">
-        <h2 id="friend-interstitial-title">Pass to Player 2</h2>
-        <p id="friend-interstitial-text">Turn complete. Hand off to the next player.</p>
+        <h2 id="friend-interstitial-title">Friend Turn Handoff</h2>
+        <p id="friend-interstitial-text">Turn complete. Pass device or share turn link.</p>
         <div id="friend-turn-code-wrap" class="friend-turn-code-wrap" hidden>
-          <label class="code-label" for="friend-turn-code">Turn code</label>
+          <label class="code-label" for="friend-turn-code">Turn link</label>
           <textarea id="friend-turn-code" class="code-text" readonly></textarea>
         </div>
+        <div class="friend-turn-code-wrap">
+          <label class="code-label" for="friend-import-code">Load turn link or code</label>
+          <textarea id="friend-import-code" class="code-text" placeholder="Paste turn link or code from other player"></textarea>
+          <button id="friend-load-code-btn" type="button">Load Turn Link</button>
+        </div>
         <div class="start-actions friend-interstitial-actions">
-          <button id="friend-copy-code-btn" type="button">Copy Turn Code</button>
-          <button id="friend-continue-btn" type="button" class="primary">Continue</button>
+          <button id="friend-copy-code-btn" type="button">Copy Turn Link</button>
+          <button id="friend-continue-btn" type="button" class="primary">Pass Device</button>
         </div>
         <div id="friend-interstitial-status" class="code-status"></div>
       </div>

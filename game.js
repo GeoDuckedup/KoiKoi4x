@@ -402,7 +402,7 @@ const state = {
   drawRevealTimer: null,
   autoFocusTargetKey: null,
   playMode: "cpu",
-  friendFlow: "hotseat",
+  friendFlow: "hybrid",
   viewerPlayerIndex: 0,
   interstitial: {
     open: false,
@@ -447,6 +447,7 @@ function init() {
     .then(() => {
       state.ready = true;
       showStartMenu();
+      tryLoadFromLocationHash();
     })
     .catch((err) => {
       addSystemLog(`Could not load card images: ${err.message}`);
@@ -499,6 +500,9 @@ function cacheUI() {
   ui.codeToggle = document.getElementById("code-toggle");
   ui.codePanel = document.getElementById("code-panel");
   ui.codePanelHead = document.getElementById("code-panel-head");
+  ui.codeAdvanced = document.getElementById("code-advanced");
+  ui.toggleAdvancedBtn = document.getElementById("toggle-advanced-btn");
+  ui.copyLinkBtn = document.getElementById("copy-link-btn");
   ui.exportCodeLabel = document.getElementById("export-code-label");
   ui.exportCode = document.getElementById("export-code");
   ui.importCodeLabel = document.getElementById("import-code-label");
@@ -511,9 +515,6 @@ function cacheUI() {
   ui.startMenu = document.getElementById("start-menu");
   ui.startModeCpuBtn = document.getElementById("start-mode-cpu-btn");
   ui.startModeFriendBtn = document.getElementById("start-mode-friend-btn");
-  ui.startFriendFlow = document.getElementById("start-friend-flow");
-  ui.startFriendHotseatBtn = document.getElementById("start-friend-hotseat-btn");
-  ui.startFriendCodeBtn = document.getElementById("start-friend-code-btn");
   ui.startLoadBtn = document.getElementById("start-load-btn");
   ui.startImportCode = document.getElementById("start-import-code");
   ui.startMenuStatus = document.getElementById("start-menu-status");
@@ -522,6 +523,8 @@ function cacheUI() {
   ui.friendInterstitialText = document.getElementById("friend-interstitial-text");
   ui.friendTurnCodeWrap = document.getElementById("friend-turn-code-wrap");
   ui.friendTurnCode = document.getElementById("friend-turn-code");
+  ui.friendImportCode = document.getElementById("friend-import-code");
+  ui.friendLoadCodeBtn = document.getElementById("friend-load-code-btn");
   ui.friendCopyCodeBtn = document.getElementById("friend-copy-code-btn");
   ui.friendContinueBtn = document.getElementById("friend-continue-btn");
   ui.friendInterstitialStatus = document.getElementById("friend-interstitial-status");
@@ -537,6 +540,8 @@ function bindUI() {
   ui.gameSummaryToggle?.addEventListener("click", onToggleGameSummaryPanel);
   ui.logToggle?.addEventListener("click", onToggleLogPanel);
   ui.codeToggle?.addEventListener("click", onToggleCodePanel);
+  ui.copyLinkBtn?.addEventListener("click", onCopyLink);
+  ui.toggleAdvancedBtn?.addEventListener("click", onToggleCodeAdvanced);
   ui.refreshCodeBtn?.addEventListener("click", onRefreshCode);
   ui.copyCodeBtn?.addEventListener("click", onCopyCode);
   ui.loadCodeBtn?.addEventListener("click", onLoadCodeFromPanel);
@@ -546,9 +551,8 @@ function bindUI() {
   });
   ui.startModeCpuBtn?.addEventListener("click", onStartModeCpuFromMenu);
   ui.startModeFriendBtn?.addEventListener("click", onStartModeFriendFromMenu);
-  ui.startFriendHotseatBtn?.addEventListener("click", onStartFriendHotseatFromMenu);
-  ui.startFriendCodeBtn?.addEventListener("click", onStartFriendCodeFromMenu);
   ui.startLoadBtn?.addEventListener("click", onStartLoadFromMenu);
+  ui.friendLoadCodeBtn?.addEventListener("click", onFriendInterstitialLoadCode);
   ui.friendCopyCodeBtn?.addEventListener("click", onFriendInterstitialCopyCode);
   ui.friendContinueBtn?.addEventListener("click", onFriendInterstitialContinue);
   ui.rulesToggle.addEventListener("click", () => {
@@ -578,7 +582,6 @@ function showStartMenu() {
     ui.startMenu.hidden = false;
   }
   setFriendInterstitialOpen(false);
-  setStartFriendFlowOpen(false);
   setLogPanelOpen(false);
   setGameSummaryPanelOpen(false);
   setCodePanelOpen(false);
@@ -590,20 +593,17 @@ function hideStartMenu() {
     ui.startMenu.hidden = true;
   }
   setFriendInterstitialOpen(false);
-  setStartFriendFlowOpen(false);
   setCodeStatus("", false, "start");
-}
-
-function setStartFriendFlowOpen(open) {
-  if (ui.startFriendFlow) {
-    ui.startFriendFlow.hidden = !open;
-  }
 }
 
 function setCodePanelOpen(open) {
   if (!ui.codePanel || !ui.codeToggle) return;
   ui.codePanel.hidden = !open;
   ui.codeToggle.textContent = open ? "Hide Code" : "Code";
+  if (!open && ui.codeAdvanced && ui.toggleAdvancedBtn) {
+    ui.codeAdvanced.hidden = true;
+    ui.toggleAdvancedBtn.textContent = "Advanced";
+  }
 }
 
 function setLogPanelOpen(open) {
@@ -633,11 +633,18 @@ function onToggleCodePanel() {
   if (nextOpen) {
     refreshExportCode();
     if (isFriendCodeMode() && !isFriendTurnExportWindow()) {
-      setCodeStatus("Turn code unlocks after a full turn handoff.", false, "panel");
+      setCodeStatus("Turn link unlocks after a full turn handoff.", false, "panel");
     } else {
       setCodeStatus("", false, "panel");
     }
   }
+}
+
+function onToggleCodeAdvanced() {
+  if (!ui.codeAdvanced || !ui.toggleAdvancedBtn) return;
+  const nextOpen = ui.codeAdvanced.hidden;
+  ui.codeAdvanced.hidden = !nextOpen;
+  ui.toggleAdvancedBtn.textContent = nextOpen ? "Hide Advanced" : "Advanced";
 }
 
 function onRefreshCode() {
@@ -648,9 +655,9 @@ function onRefreshCode() {
   }
   refreshExportCode();
   if (isFriendCodeMode()) {
-    setCodeStatus("Turn code generated.", false, "panel");
+    setCodeStatus("Raw turn code refreshed.", false, "panel");
   } else {
-    setCodeStatus("Code refreshed.", false, "panel");
+    setCodeStatus("Raw save code refreshed.", false, "panel");
   }
 }
 
@@ -661,6 +668,104 @@ function refreshExportCode() {
     ui.exportCode.value = code;
   } catch (err) {
     setCodeStatus(`Could not generate code: ${err.message}`, true, "panel");
+  }
+}
+
+function buildShareLinkFromCode(code) {
+  const url = new URL(window.location.href);
+  url.hash = `t=${code}`;
+  return url.toString();
+}
+
+function decodeURIComponentSafe(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (_err) {
+    return value;
+  }
+}
+
+function extractCodeFromInput(rawInput) {
+  const value = String(rawInput || "").trim();
+  if (!value) return "";
+
+  if (value.startsWith("#t=")) return decodeURIComponentSafe(value.slice(3).trim());
+  if (value.startsWith("t=")) return decodeURIComponentSafe(value.slice(2).trim());
+  if (value.startsWith("#HKK")) return decodeURIComponentSafe(value.slice(1).trim());
+  if (value.startsWith("HKK")) return value;
+
+  try {
+    const parsed = new URL(value, window.location.href);
+    const hash = parsed.hash.startsWith("#") ? parsed.hash.slice(1) : parsed.hash;
+    if (hash.startsWith("t=")) {
+      return decodeURIComponentSafe(hash.slice(2).trim());
+    }
+    if (hash.startsWith("HKK")) {
+      return decodeURIComponentSafe(hash.trim());
+    }
+    const queryToken = parsed.searchParams.get("t");
+    if (queryToken) {
+      return decodeURIComponentSafe(queryToken.trim());
+    }
+  } catch (_err) {
+    // fall through and treat as raw code
+  }
+
+  return value;
+}
+
+function clearShareHashFromLocation() {
+  const url = new URL(window.location.href);
+  if (!url.hash) return;
+  url.hash = "";
+  const nextUrl = `${url.pathname}${url.search}`;
+  window.history.replaceState(null, document.title, nextUrl);
+}
+
+function tryLoadFromLocationHash() {
+  const hash = window.location.hash || "";
+  if (!hash) return false;
+  const looksLikeShare = hash.startsWith("#t=") || hash.startsWith("#HKK");
+  if (!looksLikeShare) return false;
+  const loaded = loadCodeIntoGame(hash, "start");
+  if (loaded) {
+    clearShareHashFromLocation();
+    return true;
+  }
+  return false;
+}
+
+async function onCopyLink() {
+  if (!state.ready || !state.players.length) return;
+  if (isFriendCodeMode() && !isFriendTurnExportWindow()) {
+    setCodeStatus("Turn link can only be copied at turn handoff.", true, "panel");
+    return;
+  }
+  let code = "";
+  try {
+    code = encodeStateToCode();
+  } catch (err) {
+    setCodeStatus(`Could not generate link: ${err.message}`, true, "panel");
+    return;
+  }
+  const shareLink = buildShareLinkFromCode(code);
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareLink);
+    } else if (ui.importCode) {
+      ui.importCode.value = shareLink;
+      ui.importCode.focus();
+      ui.importCode.select();
+      document.execCommand("copy");
+      ui.importCode.setSelectionRange(0, 0);
+    }
+    if (isFriendMode()) {
+      setCodeStatus("Turn link copied to clipboard.", false, "panel");
+    } else {
+      setCodeStatus("Save link copied to clipboard.", false, "panel");
+    }
+  } catch (err) {
+    setCodeStatus(`Copy link failed: ${err.message}`, true, "panel");
   }
 }
 
@@ -688,9 +793,9 @@ async function onCopyCode() {
       ui.exportCode.setSelectionRange(0, 0);
     }
     if (isFriendCodeMode()) {
-      setCodeStatus("Turn code copied to clipboard.", false, "panel");
+      setCodeStatus("Raw turn code copied.", false, "panel");
     } else {
-      setCodeStatus("Code copied to clipboard.", false, "panel");
+      setCodeStatus("Raw save code copied.", false, "panel");
     }
   } catch (err) {
     setCodeStatus(`Copy failed: ${err.message}`, true, "panel");
@@ -710,21 +815,8 @@ function onStartModeCpuFromMenu() {
 
 function onStartModeFriendFromMenu() {
   if (!state.ready) return;
-  const currentlyOpen = ui.startFriendFlow ? !ui.startFriendFlow.hidden : false;
-  setStartFriendFlowOpen(!currentlyOpen);
-  setCodeStatus("", false, "start");
-}
-
-function onStartFriendHotseatFromMenu() {
-  if (!state.ready) return;
   hideStartMenu();
-  startNewMatch({ playMode: "friend", friendFlow: "hotseat" });
-}
-
-function onStartFriendCodeFromMenu() {
-  if (!state.ready) return;
-  hideStartMenu();
-  startNewMatch({ playMode: "friend", friendFlow: "code" });
+  startNewMatch({ playMode: "friend", friendFlow: "hybrid" });
 }
 
 function onStartLoadFromMenu() {
@@ -733,7 +825,7 @@ function onStartLoadFromMenu() {
 }
 
 function setCodeStatus(message, isError, target = "panel") {
-  const node = target === "start" ? ui.startMenuStatus : ui.codeStatus;
+  const node = target === "start" ? ui.startMenuStatus : target === "friend" ? ui.friendInterstitialStatus : ui.codeStatus;
   if (!node) return;
   node.textContent = message || "";
   node.classList.toggle("error", Boolean(message && isError));
@@ -741,10 +833,7 @@ function setCodeStatus(message, isError, target = "panel") {
 }
 
 function setFriendInterstitialStatus(message, isError) {
-  if (!ui.friendInterstitialStatus) return;
-  ui.friendInterstitialStatus.textContent = message || "";
-  ui.friendInterstitialStatus.classList.toggle("error", Boolean(message && isError));
-  ui.friendInterstitialStatus.classList.toggle("success", Boolean(message && !isError));
+  setCodeStatus(message, isError, "friend");
 }
 
 function setFriendInterstitialOpen(open, nextPlayerIndex = null) {
@@ -759,7 +848,13 @@ function setFriendInterstitialOpen(open, nextPlayerIndex = null) {
   };
   if (!shouldOpen) {
     setFriendInterstitialStatus("", false);
+    if (ui.friendImportCode) ui.friendImportCode.value = "";
   }
+}
+
+function onFriendInterstitialLoadCode() {
+  const raw = ui.friendImportCode?.value || "";
+  loadCodeIntoGame(raw, "friend");
 }
 
 function prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {
@@ -775,26 +870,26 @@ function prepareFriendTurnHandoff(lastActorIndex, moveNumber, nextPlayerIndex) {
 
 async function onFriendInterstitialCopyCode() {
   if (!isFriendMode() || !state.interstitial?.open) return;
-  let code = "";
+  let link = "";
   try {
-    code = encodeStateToCode();
+    link = buildShareLinkFromCode(encodeStateToCode());
   } catch (err) {
-    setFriendInterstitialStatus(`Could not generate code: ${err.message}`, true);
+    setFriendInterstitialStatus(`Could not generate link: ${err.message}`, true);
     return;
   }
   if (ui.friendTurnCode) {
-    ui.friendTurnCode.value = code;
+    ui.friendTurnCode.value = link;
   }
   try {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(code);
+      await navigator.clipboard.writeText(link);
     } else if (ui.friendTurnCode) {
       ui.friendTurnCode.focus();
       ui.friendTurnCode.select();
       document.execCommand("copy");
       ui.friendTurnCode.setSelectionRange(0, 0);
     }
-    setFriendInterstitialStatus("Turn code copied.", false);
+    setFriendInterstitialStatus("Turn link copied.", false);
   } catch (err) {
     setFriendInterstitialStatus(`Copy failed: ${err.message}`, true);
   }
@@ -812,10 +907,10 @@ function onFriendInterstitialContinue() {
 }
 
 function loadCodeIntoGame(rawInput, target = "panel") {
-  const normalized = String(rawInput || "").trim();
+  const normalized = extractCodeFromInput(rawInput);
   if (!normalized) {
-    setCodeStatus("Paste a code first.", true, target);
-    return;
+    setCodeStatus("Paste a link or code first.", true, target);
+    return false;
   }
 
   try {
@@ -824,7 +919,7 @@ function loadCodeIntoGame(rawInput, target = "panel") {
     applySnapshot(snapshot);
     hideStartMenu();
     setCodePanelOpen(false);
-    if (snapshot.playMode === "friend" && snapshot.friendFlow === "code" && snapshot.lastExportMeta) {
+    if (snapshot.playMode === "friend" && snapshot.lastExportMeta) {
       const playerLabel = `Player ${snapshot.lastExportMeta.playerIndex + 1}`;
       setCodeStatus(`Turn code loaded (${playerLabel}, move ${snapshot.lastExportMeta.turnNumber}).`, false, target);
     } else {
@@ -836,14 +931,19 @@ function loadCodeIntoGame(rawInput, target = "panel") {
     if (target === "start" && ui.startImportCode) {
       ui.startImportCode.value = "";
     }
+    if (target === "friend" && ui.friendImportCode) {
+      ui.friendImportCode.value = "";
+    }
     refreshExportCode();
+    return true;
   } catch (err) {
     setCodeStatus(`Load failed: ${err.message}`, true, target);
+    return false;
   }
 }
 
 function validateFriendCodeSnapshotForImport(snapshot) {
-  if (!snapshot || snapshot.playMode !== "friend" || snapshot.friendFlow !== "code") return;
+  if (!snapshot || snapshot.playMode !== "friend") return;
   if (snapshot.turnCheckpointReady !== true) {
     throw new Error("This turn code is not at a valid handoff checkpoint");
   }
@@ -1146,8 +1246,8 @@ function validatePlayMode(value, label) {
 }
 
 function validateFriendFlow(value, label) {
-  if (value !== "hotseat" && value !== "code") {
-    throw new Error(`${label} must be hotseat or code`);
+  if (value !== "hotseat" && value !== "code" && value !== "hybrid") {
+    throw new Error(`${label} must be hotseat, code, or hybrid`);
   }
 }
 
@@ -1302,7 +1402,7 @@ function applySnapshot(snapshot) {
   state.aiPreview = hydrateAiPreview(snapshot.aiPreview);
   state.cpuPhase1PreviewCardId = snapshot.cpuPhase1PreviewCardId || null;
 
-  if (state.playMode === "friend" && state.friendFlow === "code" && state.interstitial.open) {
+  if (state.playMode === "friend" && state.interstitial.open) {
     const nextPlayerIndex =
       state.interstitial.nextPlayerIndex === null || state.interstitial.nextPlayerIndex === undefined
         ? state.currentPlayer
@@ -1381,7 +1481,10 @@ function normalizePlayMode(value) {
 }
 
 function normalizeFriendFlow(value) {
-  return value === "code" ? "code" : "hotseat";
+  if (value === "hotseat" || value === "code" || value === "hybrid") {
+    return "hybrid";
+  }
+  return "hybrid";
 }
 
 function normalizeInterstitial(interstitial) {
@@ -1641,9 +1744,9 @@ function startNewMatch(options = {}) {
   setGameSummaryPanelOpen(false);
   setCodeStatus("", false, "panel");
   const playModeSource = options.playMode || state.playMode || "cpu";
-  const friendFlowSource = options.friendFlow || state.friendFlow || "hotseat";
+  const friendFlowSource = options.friendFlow || state.friendFlow || "hybrid";
   const playMode = playModeSource === "friend" ? "friend" : "cpu";
-  const friendFlow = friendFlowSource === "code" ? "code" : "hotseat";
+  const friendFlow = normalizeFriendFlow(friendFlowSource);
   clearAITask();
   state.playMode = playMode;
   state.friendFlow = friendFlow;
@@ -1798,11 +1901,11 @@ function isFriendMode() {
 }
 
 function isFriendCodeMode() {
-  return isFriendMode() && state.friendFlow === "code";
+  return isFriendMode();
 }
 
 function isFriendTurnExportWindow() {
-  return isFriendCodeMode() && Boolean(state.interstitial?.open);
+  return isFriendMode() && Boolean(state.interstitial?.open);
 }
 
 function getViewerPlayerIndex() {
@@ -3200,29 +3303,33 @@ function renderCodePanel() {
   const handoffOpen = isFriendTurnExportWindow();
 
   if (ui.codePanelHead) {
-    ui.codePanelHead.textContent = friendCodeMode ? "Turn Code" : "Save / Load Code";
+    ui.codePanelHead.textContent = friendCodeMode ? "Turn Link" : "Save / Load";
   }
   if (ui.exportCodeLabel) {
-    ui.exportCodeLabel.textContent = friendCodeMode ? "Current turn code" : "Your current game code";
+    ui.exportCodeLabel.textContent = friendCodeMode ? "Current raw turn code" : "Current raw save code";
   }
   if (ui.importCodeLabel) {
-    ui.importCodeLabel.textContent = friendCodeMode ? "Load turn code" : "Load from code";
+    ui.importCodeLabel.textContent = friendCodeMode ? "Load from turn link or code" : "Load from link or code";
+  }
+  if (ui.copyLinkBtn) {
+    ui.copyLinkBtn.textContent = friendCodeMode ? "Copy Turn Link" : "Copy Save Link";
+    ui.copyLinkBtn.disabled = friendCodeMode && !handoffOpen;
   }
   if (ui.refreshCodeBtn) {
-    ui.refreshCodeBtn.textContent = friendCodeMode ? "Generate Turn Code" : "Refresh Code";
+    ui.refreshCodeBtn.textContent = friendCodeMode ? "Refresh Raw Turn Code" : "Refresh Raw Save Code";
     ui.refreshCodeBtn.disabled = friendCodeMode && !handoffOpen;
   }
   if (ui.copyCodeBtn) {
-    ui.copyCodeBtn.textContent = friendCodeMode ? "Copy Turn Code" : "Copy Code";
+    ui.copyCodeBtn.textContent = friendCodeMode ? "Copy Raw Turn Code" : "Copy Raw Save Code";
     ui.copyCodeBtn.disabled = friendCodeMode && !handoffOpen;
   }
   if (ui.importCode) {
-    ui.importCode.placeholder = friendCodeMode ? "Paste turn code from other player" : "Paste a code here";
+    ui.importCode.placeholder = friendCodeMode ? "Paste turn link or code from other player" : "Paste a save link or code here";
   }
   if (ui.exportCode) {
     ui.exportCode.placeholder =
       friendCodeMode && !handoffOpen
-        ? "Turn code appears after a full turn handoff."
+        ? "Raw turn code appears after a full turn handoff."
         : "";
   }
 }
@@ -3231,10 +3338,7 @@ function computeTurnCheckpointReady() {
   if (state.matchOver || state.roundOver) return false;
   if (state.pendingSelection || state.awaitingDeckFlip || state.awaitingDecision) return false;
   if (state.aiPreview || state.cpuPhase1PreviewCardId) return false;
-  if (isFriendCodeMode()) {
-    return Boolean(state.interstitial?.open);
-  }
-  if (isFriendMode() && state.friendFlow === "hotseat" && state.interstitial?.open) return false;
+  if (isFriendMode()) return Boolean(state.interstitial?.open);
   return true;
 }
 
@@ -3251,37 +3355,50 @@ function renderFriendInterstitial() {
   const nextName = state.players[nextPlayerIndex]?.name || `Player ${nextPlayerIndex + 1}`;
   const previousPlayerIndex = nextPlayerIndex === 0 ? 1 : 0;
   const previousName = state.players[previousPlayerIndex]?.name || `Player ${previousPlayerIndex + 1}`;
-  const isCodeFlow = state.friendFlow === "code";
 
   if (ui.friendInterstitialTitle) {
-    ui.friendInterstitialTitle.textContent = isCodeFlow ? `Send Turn Code to ${nextName}` : `Pass to ${nextName}`;
+    ui.friendInterstitialTitle.textContent = `Pass to ${nextName}`;
   }
   if (ui.friendInterstitialText) {
     const moveText = state.lastExportMeta
       ? ` (${previousName} move ${state.lastExportMeta.turnNumber})`
       : "";
-    ui.friendInterstitialText.textContent = isCodeFlow
-      ? `${previousName}'s turn is complete${moveText}. Copy this code and send it to ${nextName}.`
-      : `${previousName}'s turn is complete${moveText}. Pass the phone to ${nextName}, then continue.`;
-  }
-  if (ui.friendTurnCodeWrap) {
-    ui.friendTurnCodeWrap.hidden = !isCodeFlow;
-  }
-  if (ui.friendCopyCodeBtn) {
-    ui.friendCopyCodeBtn.hidden = !isCodeFlow;
+    ui.friendInterstitialText.textContent = `${previousName}'s turn is complete${moveText}. Pass the phone, or copy a turn link and continue asynchronously.`;
   }
   if (ui.friendContinueBtn) {
-    ui.friendContinueBtn.textContent = isCodeFlow ? "Continue on This Device" : `${nextName} Ready`;
+    ui.friendContinueBtn.textContent = `${nextName} Ready`;
   }
   if (ui.friendTurnCode) {
-    if (!isCodeFlow) {
+    try {
+      ui.friendTurnCode.value = buildShareLinkFromCode(encodeStateToCode());
+    } catch (_err) {
       ui.friendTurnCode.value = "";
-    } else {
-      try {
-        ui.friendTurnCode.value = encodeStateToCode();
-      } catch (_err) {
-        ui.friendTurnCode.value = "";
-      }
+    }
+  }
+  if (ui.friendImportCode) {
+    ui.friendImportCode.placeholder = "Paste turn link or code from other player";
+  }
+  if (ui.friendCopyCodeBtn) {
+    ui.friendCopyCodeBtn.disabled = !isFriendTurnExportWindow();
+  }
+  if (ui.friendLoadCodeBtn) {
+    ui.friendLoadCodeBtn.disabled = false;
+  }
+  if (ui.friendTurnCodeWrap) {
+    ui.friendTurnCodeWrap.hidden = false;
+  }
+  if (ui.friendCopyCodeBtn) {
+    ui.friendCopyCodeBtn.hidden = false;
+  }
+  if (!isFriendTurnExportWindow()) {
+    if (ui.friendTurnCode) {
+      ui.friendTurnCode.value = "";
+    }
+    if (ui.friendCopyCodeBtn) {
+      ui.friendCopyCodeBtn.disabled = true;
+    }
+    if (ui.friendInterstitialText) {
+      ui.friendInterstitialText.textContent = "Waiting for a completed turn handoff.";
     }
   }
 }
